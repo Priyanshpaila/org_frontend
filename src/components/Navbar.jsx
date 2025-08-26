@@ -37,7 +37,7 @@ const VARIANT_CLASSES = {
   info: "bg-blue-600 text-white hover:bg-blue-700",         // Users (primary blue)
   brand: "bg-indigo-600 text-white hover:bg-indigo-700",    // Special Referral (brand emphasis)
   success: "bg-green-600 text-white hover:bg-green-700",    // Add User (positive)
-  warning: "bg-amber-500 text-white hover:bg-amber-600",    // High Power (attention)
+  warning: "bg-amber-500 text-white hover:bg-amber-600",    // Meta Access (attention)
   primary: "bg-slate-600 text-white hover:bg-slate-700",    // General default
   danger: "bg-red-600 text-white hover:bg-red-700",         // Logout (destructive)
 };
@@ -159,7 +159,7 @@ export default function Navbar() {
             <Item to="/special-referrals" variant="brand">Special Referral</Item>
           )}
           {isAdmin() && <Item to="/add-user" variant="success">Add User</Item>}
-          {isSuperAdmin() && <Item to="/superadmin" variant="warning">High Power</Item>}
+          {isSuperAdmin() && <Item to="/superadmin" variant="warning">Meta Access</Item>}
           <Item to="/profile" variant="neutral">{user?.name ?? "Profile"}</Item>
           <button
             onClick={onLogout}
@@ -246,7 +246,7 @@ export default function Navbar() {
                 <Item to="/add-user" onClick={close} variant="success">Add User</Item>
               )}
               {isSuperAdmin() && (
-                <Item to="/superadmin" onClick={close} variant="warning">High Power</Item>
+                <Item to="/superadmin" onClick={close} variant="warning">Meta Access</Item>
               )}
               <Item to="/profile" onClick={close} variant="neutral">Profile</Item>
               <button
