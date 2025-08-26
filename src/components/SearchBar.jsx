@@ -132,7 +132,7 @@ export default function SearchBar({
           </button>
         </div>
 
-        {/* submit (mobile stacked) */}
+        {/* submit (mobile stacked)
         <button
           type="submit"
           disabled={isLoading}
@@ -140,7 +140,7 @@ export default function SearchBar({
           aria-label="Search"
         >
           {isLoading ? <Spinner /> : 'Search'}
-        </button>
+        </button> */}
       </div>
 
       {/* helper row */}

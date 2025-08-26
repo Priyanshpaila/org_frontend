@@ -5,7 +5,7 @@ import { useAuthStore } from "../store/authStore.js";
 import RoleBadge from "../components/RoleBadge.jsx";
 import { useNavigate } from "react-router-dom";
 
-const STATUS_OPTIONS = ["active", "inactive", "terminated", "on_leave"];
+const STATUS_OPTIONS = ["active", "inactive", "vacant", "on_leave"];
 
 export default function SuperAdmin() {
   const isSuper = useAuthStore((s) => s.isSuperAdmin());
@@ -924,7 +924,7 @@ export default function SuperAdmin() {
                           value={activeUser.status || "active"}
                           onChange={(e) => changeStatus(e.target.value)}
                         >
-                          {["active", "inactive", "terminated", "on_leave"].map(
+                          {["active", "inactive", "vacant", "on_leave"].map(
                             (s) => (
                               <option key={s} value={s}>
                                 {s}

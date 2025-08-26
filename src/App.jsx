@@ -5,7 +5,8 @@ import Home from './pages/Home.jsx'
 import AddUser from './pages/AddUser.jsx'
 import SuperAdmin from './pages/SuperAdmin.jsx'
 import Profile from './pages/Profile.jsx'
-import Users from './pages/Users.jsx'            // 👈 NEW
+import Users from './pages/Users.jsx'    
+import SpecialReferralNew from './pages/SpecialReferralNew.jsx'         // 👈 NEW
 import ProtectedRoute from './components/ProtectedRoute.jsx'
 
 export default function App() {
@@ -22,7 +23,8 @@ export default function App() {
 
       {/* Admin + Superadmin */}
       <Route element={<ProtectedRoute roles={['admin','superadmin']} />}>
-        <Route path="/users" element={<Users />} />     {/* 👈 NEW route */}
+        <Route path="/users" element={<Users />} />  
+        <Route path="/special-referrals" element={<SpecialReferralNew />} />   {/* 👈 NEW route */}
         <Route path="/add-user" element={<AddUser />} />
       </Route>
 

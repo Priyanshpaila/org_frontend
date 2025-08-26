@@ -4,7 +4,7 @@ import api from '../lib/api.js'
 import { useAuthStore } from '../store/authStore.js'
 import { useNavigate } from 'react-router-dom'
 
-const STATUS_OPTIONS = ['active', 'inactive', 'terminated', 'on_leave']
+const STATUS_OPTIONS = ['active', 'inactive', 'vacant', 'on_leave']
 const MGR_MIN_CHARS = 2
 const MGR_DEBOUNCE_MS = 400
 

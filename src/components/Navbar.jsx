@@ -2,6 +2,61 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "../store/authStore.js";
 
+const BRAND_NAME = "YourCompany";
+// Put your logo at: /public/logo.png  (served as /logo.png)
+const BRAND_SRC = "/logo.png";
+
+function BrandLogo({ src = BRAND_SRC, name = BRAND_NAME, sizeClass = "h-10 w-15" }) {
+  const [error, setError] = useState(false);
+  if (!error && src) {
+    return (
+      <img
+        src={src}
+        alt={`${name} logo`}
+        className={`${sizeClass} rounded-lg object-contain`}
+        onError={() => setError(true)}
+        width={110}
+        height={110}
+        draggable={false}
+      />
+    );
+  }
+  return (
+    <div
+      className={`${sizeClass} rounded-lg bg-brand-600 text-white flex items-center justify-center font-semibold select-none`}
+      aria-label={name}
+    >
+      {String(name || "?").charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+const VARIANT_CLASSES = {
+  ghost: "btn-ghost",
+  neutral: "bg-gray-100 text-gray-800 hover:bg-gray-200",   // Profile / neutral links
+  info: "bg-blue-600 text-white hover:bg-blue-700",         // Users (primary blue)
+  brand: "bg-indigo-600 text-white hover:bg-indigo-700",    // Special Referral (brand emphasis)
+  success: "bg-green-600 text-white hover:bg-green-700",    // Add User (positive)
+  warning: "bg-amber-500 text-white hover:bg-amber-600",    // High Power (attention)
+  primary: "bg-slate-600 text-white hover:bg-slate-700",    // General default
+  danger: "bg-red-600 text-white hover:bg-red-700",         // Logout (destructive)
+};
+
+
+
+function Item({ to, children, variant = "ghost", className = "", onClick }) {
+  const v = VARIANT_CLASSES[variant] || VARIANT_CLASSES.ghost;
+  return (
+    <Link
+      to={to}
+      className={`btn w-full justify-start md:w-auto ${v} ${className}`}
+      onClick={onClick}
+    >
+      {children}
+    </Link>
+  );
+}
+
 export default function Navbar() {
   const { user, logout, isAdmin, isSuperAdmin } = useAuthStore();
   const nav = useNavigate();
@@ -13,22 +68,15 @@ export default function Navbar() {
   const closeBtnRef = useRef(null);
   const lastFocusedRef = useRef(null);
 
-  const onLogout = () => {
-    logout();
-    nav("/login");
-  };
   const close = () => setOpen(false);
+  const onLogout = () => { logout(); nav("/login"); };
 
   // Close mobile menu on route change
-  useEffect(() => {
-    setOpen(false);
-  }, [loc.pathname]);
+  useEffect(() => { setOpen(false); }, [loc.pathname]);
 
   // ESC closes the menu
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") setOpen(false);
-    };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
@@ -40,7 +88,6 @@ export default function Navbar() {
     // Save current scroll position
     scrollYRef.current = window.scrollY || document.documentElement.scrollTop;
 
-    // Lock the page (iOS/Safari-safe)
     const html = document.documentElement;
     const body = document.body;
 
@@ -58,25 +105,17 @@ export default function Navbar() {
     body.style.top = `-${scrollYRef.current}px`;
     body.style.width = "100%";
 
-    // focus management
     lastFocusedRef.current = document.activeElement;
     setTimeout(() => closeBtnRef.current?.focus(), 0);
 
     return () => {
-      // restore styles
       html.style.overflow = prev.htmlOverflow || "";
       body.style.overflow = prev.bodyOverflow || "";
       body.style.position = prev.bodyPosition || "";
       body.style.top = prev.bodyTop || "";
       body.style.width = prev.bodyWidth || "";
-
-      // restore scroll position
       window.scrollTo(0, scrollYRef.current);
-
-      // restore focus
-      try {
-        lastFocusedRef.current?.focus?.();
-      } catch {}
+      try { lastFocusedRef.current?.focus?.(); } catch {}
     };
   }, [open]);
 
@@ -94,43 +133,39 @@ export default function Navbar() {
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
+        e.preventDefault(); last.focus();
       } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
+        e.preventDefault(); first.focus();
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  const Item = ({ to, children, className = "" }) => (
-    <Link
-      to={to}
-      className={`btn btn-ghost w-full justify-start md:w-auto ${className}`}
-      onClick={close}
-    >
-      {children}
-    </Link>
-  );
+  const canSeeAdminArea = isAdmin() || isSuperAdmin();
 
   return (
     <div className="sticky top-0 z-30 border-b bg-white/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
         {/* Brand */}
         <Link to="/" className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg bg-brand-600" />
-          <span className="text-lg font-semibold">YourCompany</span>
+          <BrandLogo />
         </Link>
 
         {/* Desktop actions */}
         <div className="hidden md:flex items-center gap-2">
-          {(isAdmin() || isSuperAdmin()) && <Item to="/users">Users</Item>}
-          {isAdmin() && <Item to="/add-user">Add User</Item>}
-          {isSuperAdmin() && <Item to="/superadmin">High Power</Item>}
-          <Item to="/profile">{user?.name ?? "Profile"}</Item>
-          <button onClick={onLogout} className="btn btn-primary">
+          {canSeeAdminArea && <Item to="/users" variant="info">Users</Item>}
+          {canSeeAdminArea && (
+            <Item to="/special-referrals" variant="brand">Special Referral</Item>
+          )}
+          {isAdmin() && <Item to="/add-user" variant="success">Add User</Item>}
+          {isSuperAdmin() && <Item to="/superadmin" variant="warning">High Power</Item>}
+          <Item to="/profile" variant="neutral">{user?.name ?? "Profile"}</Item>
+          <button
+            onClick={onLogout}
+            className={`btn ${VARIANT_CLASSES.danger}`}
+            title="Sign out"
+          >
             Logout
           </button>
         </div>
@@ -176,7 +211,7 @@ export default function Navbar() {
             {/* header in panel */}
             <div className="flex items-center justify-between px-4 py-3 border-b sticky top-0 bg-white/90 backdrop-blur">
               <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-lg bg-brand-600" />
+                <BrandLogo />
                 <span className="font-semibold">Menu</span>
               </div>
               <button
@@ -193,24 +228,30 @@ export default function Navbar() {
             <div className="px-4 py-3 border-b">
               <div className="text-sm text-gray-600">Signed in as</div>
               <div className="font-medium">{user?.name ?? "User"}</div>
-              <div className="text-xs text-gray-500 break-all">
-                {user?.email}
-              </div>
+              <div className="text-xs text-gray-500 break-all">{user?.email}</div>
             </div>
 
             {/* links */}
             <div className="p-3 flex flex-col gap-2">
-              <Item to="/">Home</Item>
-              {(isAdmin() || isSuperAdmin()) && <Item to="/users">Users</Item>}
-              {isAdmin() && <Item to="/add-user">Add User</Item>}
-              {isSuperAdmin() && <Item to="/superadmin">High Power</Item>}
-              <Item to="/profile">Profile</Item>
+              <Item to="/" onClick={close}>Home</Item>
+              {canSeeAdminArea && (
+                <Item to="/users" onClick={close} variant="info">Users</Item>
+              )}
+              {canSeeAdminArea && (
+                <Item to="/special-referrals" onClick={close} variant="brand">
+                  Special Referral
+                </Item>
+              )}
+              {isAdmin() && (
+                <Item to="/add-user" onClick={close} variant="success">Add User</Item>
+              )}
+              {isSuperAdmin() && (
+                <Item to="/superadmin" onClick={close} variant="warning">High Power</Item>
+              )}
+              <Item to="/profile" onClick={close} variant="neutral">Profile</Item>
               <button
-                onClick={() => {
-                  close();
-                  onLogout();
-                }}
-                className="btn btn-primary w-full mt-1"
+                onClick={() => { close(); onLogout(); }}
+                className={`btn w-full mt-1 ${VARIANT_CLASSES.danger}`}
               >
                 Logout
               </button>
@@ -218,7 +259,7 @@ export default function Navbar() {
 
             {/* little brand footer */}
             <div className="mt-auto px-4 py-3 text-xs text-gray-500 border-t">
-              © {new Date().getFullYear()} YourCompany
+              © {new Date().getFullYear()} {BRAND_NAME}
             </div>
           </div>
 

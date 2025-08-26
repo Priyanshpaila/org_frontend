@@ -64,6 +64,22 @@ export default function Home() {
     }
   };
 
+  // Click a node in any tree → jump into details view
+  const handleNodeClick = (u) => {
+    if (!u || !u._id) return;
+    setSelected(u);
+    // put a meaningful token in q to enter "search mode" details view
+    const token = u.name || u.empId || u.email || "";
+    setQ(token);
+    setHasSearched(false); // avoid flashing "no results" while we show selected directly
+    loadSubtree(u._id);
+    // optionally seed dropdown with the clicked user so the selector isn't empty
+    setResults((prev) => {
+      if (Array.isArray(prev) && prev.find((x) => x._id === u._id)) return prev;
+      return [u, ...prev];
+    });
+  };
+
   // Load main forest (≤ depth 6) + my direct reports
   useEffect(() => {
     let mounted = true;
@@ -111,10 +127,7 @@ export default function Home() {
   // UI helpers
   const typingButNotReady = q.trim().length > 0 && q.trim().length < MIN_CHARS;
   const showNoResults =
-    hasSearched &&
-    !loading &&
-    q.trim().length >= MIN_CHARS &&
-    results.length === 0;
+    hasSearched && !loading && q.trim().length >= MIN_CHARS && results.length === 0;
 
   return (
     <div className="min-h-full bg-gray-50">
@@ -160,14 +173,22 @@ export default function Home() {
         {!q && (
           <>
             <div className="mb-3 text-lg font-semibold">Main Org Tree</div>
-            <OrgTree data={mainTree} mode="subtree" />
+            <OrgTree
+              data={mainTree}
+              mode="subtree"
+              onNodeClick={handleNodeClick}
+            />
 
             {myReports?.length > 0 && (
               <>
                 <div className="mt-6 mb-2 text-lg font-semibold">
                   My Direct Reports
                 </div>
-                <OrgTree data={myReports} mode="roots" />
+                <OrgTree
+                  data={myReports}
+                  mode="roots"
+                  onNodeClick={handleNodeClick}
+                />
               </>
             )}
           </>
@@ -198,7 +219,11 @@ export default function Home() {
                 <div className="mt-4 mb-2 text-lg font-semibold">
                   Hierarchy around {selected.name}
                 </div>
-                <OrgTree data={subtree} mode="subtree" />
+                <OrgTree
+                  data={subtree}
+                  mode="subtree"
+                  onNodeClick={handleNodeClick}
+                />
               </>
             )}
           </>
