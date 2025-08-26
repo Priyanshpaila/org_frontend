@@ -14,6 +14,7 @@ export default function Users() {
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState([]);
 
+
   // meta (for selects)
   const [meta, setMeta] = useState({
     departments: [],
@@ -71,7 +72,7 @@ export default function Users() {
     return () => {
       mounted = false;
     };
-  }, [token]);
+  }, [me?._id]);
 
   // --------- Lock body scroll when modal open ----------
   useEffect(() => {

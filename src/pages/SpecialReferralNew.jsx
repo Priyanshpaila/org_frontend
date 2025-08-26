@@ -7,38 +7,23 @@ const DEFAULT_LEFT_LOGO = "/left-logo.png";
 const DEFAULT_RIGHT_LOGO = "/right-logo.png";
 
 
-// put this near the top of the file (or export from a small hook file)
-// function ensureAuthOnRefresh() {
-//   // read from store and localStorage
-//   const state = useAuthStore.getState?.();
-//   const storeToken = state?.accessToken;
-//   const lsToken = (() => {
-//     try {
-//       return localStorage.getItem("accessToken");
-//     } catch {
-//       return null;
-//     }
-//   })();
+function ensureAuthOnRefresh() {
+  const s = useAuthStore.getState?.();
+  const token =
+    s?.accessToken ||
+    (typeof localStorage !== "undefined" && localStorage.getItem("accessToken")) ||
+    null;
 
-//   const token = storeToken || lsToken;
-
-//   // normalize weird stringy values
-//   const valid =
-//     token && token !== "null" && token !== "undefined" && token.trim() !== "";
-
-//   if (valid) {
-//     // 1) put it back into the store if it was empty
-//     if (!storeToken && state?.setTokens) {
-//       state.setTokens({ accessToken: token });
-//     }
-//     // 2) set axios default (covers the very first request on page load)
-//     api.defaults.headers.common.Authorization = `Bearer ${token}`;
-//     return true;
-//   } else {
-//     delete api.defaults.headers.common.Authorization;
-//     return false;
-//   }
-// }
+  if (token && token !== "null" && token !== "undefined" && token.trim() !== "") {
+    if (!s?.accessToken && s?.setTokens) s.setTokens({ accessToken: token });
+    // ensure the very first request after refresh has the header
+    api.defaults.headers.common.Authorization = `Bearer ${token}`;
+    return true;
+  } else {
+    delete api.defaults.headers.common.Authorization;
+    return false;
+  }
+}
 
 
 export default function SpecialReferralNew() {
@@ -108,7 +93,7 @@ export default function SpecialReferralNew() {
 
 useEffect(() => {
   // make sure axios has the auth header on first paint (hard refresh)
-  // ensureAuthOnRefresh();
+  ensureAuthOnRefresh();
   // now safely load
   loadSnapshots();
 }, []); // run once on mount
