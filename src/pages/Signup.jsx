@@ -6,8 +6,9 @@ import { useAuthStore } from '../store/authStore.js'
 export default function Signup() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')     // exactly 8 chars
-  const [confirm, setConfirm] = useState('')       // exactly 8 chars
+  const [empId, setEmpId] = useState('')             // 👈 REQUIRED
+  const [password, setPassword] = useState('')       // exactly 8 chars
+  const [confirm, setConfirm] = useState('')         // exactly 8 chars
 
   const [showPwd, setShowPwd] = useState(false)
   const [showCfm, setShowCfm] = useState(false)
@@ -23,18 +24,20 @@ export default function Signup() {
   // ---------- validation ----------
   const emailOk = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(e || '').trim())
   const nameOk  = (n) => String(n || '').trim().length >= 2
+  const empOk   = (v) => String(v || '').trim().length > 0   // required; add stricter rules if you want
 
   const errors = useMemo(() => {
     const e = {}
     if (!nameOk(name)) e.name = 'Full name is required (min 2 characters)'
     if (!email.trim()) e.email = 'Email is required'
     else if (!emailOk(email)) e.email = 'Enter a valid email'
+    if (!empOk(empId)) e.empId = 'Employee ID is required'
     if (!password) e.password = 'Password is required'
     else if (password.length !== 8) e.password = 'Password must be exactly 8 characters'
     if (!confirm) e.confirm = 'Confirm your password'
     else if (confirm !== password) e.confirm = 'Passwords do not match'
     return e
-  }, [name, email, password, confirm])
+  }, [name, email, empId, password, confirm])
 
   const invalid = Object.keys(errors).length > 0
 
@@ -56,22 +59,26 @@ export default function Signup() {
   // ---------- submit ----------
   const onSubmit = async (e) => {
     e.preventDefault()
-    setTouched({ name: true, email: true, password: true, confirm: true })
+    setTouched({ name: true, email: true, empId: true, password: true, confirm: true })
     setErr(null)
     if (invalid) return
 
     try {
       setLoading(true)
-      const { data } = await api.post('/auth/signup', {
+
+      const payload = {
         name: name.trim(),
         email: email.trim().toLowerCase(),
+        empId: empId.trim(),            // 👈 always include (required)
         password
-      })
-      // auto-login like your current flow
+      }
+
+      const { data } = await api.post('/auth/signup', payload)
+
+      // auto-login (no refresh token in your app)
       loginStore({
         user: data.user,
         accessToken: data.accessToken,
-        refreshToken: data.refreshToken
       })
       nav('/')
     } catch (e) {
@@ -92,7 +99,7 @@ export default function Signup() {
         {/* Brand */}
         <div className="mb-5 flex items-center justify-center">
           <img
-            src="/logo.png"                  // place your logo in /public/logo.png
+            src="/logo.png"
             alt="YourCompany logo"
             className="h-50 w-50 rounded-xl object-contain"
             loading="eager"
@@ -142,6 +149,22 @@ export default function Signup() {
           />
           {touched.email && errors.email && (
             <div className="mt-1 text-xs text-rose-600">{errors.email}</div>
+          )}
+        </div>
+
+        {/* Employee ID (REQUIRED) */}
+        <div className="mb-3">
+          <label className="mb-1 block text-sm font-medium text-gray-700">Employee ID</label>
+          <input
+            className="input w-full"
+            value={empId}
+            onChange={(e) => setEmpId(e.target.value)}
+            onBlur={() => setTouched(t => ({ ...t, empId: true }))}
+            placeholder="e.g., EMP12345"
+            required
+          />
+          {touched.empId && errors.empId && (
+            <div className="mt-1 text-xs text-rose-600">{errors.empId}</div>
           )}
         </div>
 

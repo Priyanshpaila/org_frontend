@@ -14,7 +14,6 @@ export default function Users() {
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState([]);
 
-
   // meta (for selects)
   const [meta, setMeta] = useState({
     departments: [],
@@ -303,7 +302,7 @@ export default function Users() {
       return;
     try {
       setWorking(true);
-      await api.delete(`/users/${activeUser._id}`);
+      await api.delete(`/users/${activeUser._id}/hard`);
       toast("User permanently deleted");
       closeModal();
       loadUsers(q);
@@ -317,6 +316,10 @@ export default function Users() {
   /* ---------- UI helpers ---------- */
   const fmt = (d) => (d ? new Date(d).toLocaleDateString() : "—");
   const filteredCount = useMemo(() => users.length, [users]);
+  const activeUsers = useMemo(() => users.filter((u) => !u.isDeleted), [users]);
+  const deletedUsers = useMemo(() => users.filter((u) => u.isDeleted), [users]);
+  // const filteredCount = useMemo(() => activeUsers.length, [activeUsers]);
+
 
   return (
     <div className="min-h-full bg-gray-50">
