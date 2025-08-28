@@ -6,15 +6,20 @@ import { useAuthStore } from "../store/authStore.js";
 const DEFAULT_LEFT_LOGO = "/left-logo.png";
 const DEFAULT_RIGHT_LOGO = "/right-logo.png";
 
-
 function ensureAuthOnRefresh() {
   const s = useAuthStore.getState?.();
   const token =
     s?.accessToken ||
-    (typeof localStorage !== "undefined" && localStorage.getItem("accessToken")) ||
+    (typeof localStorage !== "undefined" &&
+      localStorage.getItem("accessToken")) ||
     null;
 
-  if (token && token !== "null" && token !== "undefined" && token.trim() !== "") {
+  if (
+    token &&
+    token !== "null" &&
+    token !== "undefined" &&
+    token.trim() !== ""
+  ) {
     if (!s?.accessToken && s?.setTokens) s.setTokens({ accessToken: token });
     // ensure the very first request after refresh has the header
     api.defaults.headers.common.Authorization = `Bearer ${token}`;
@@ -25,10 +30,7 @@ function ensureAuthOnRefresh() {
   }
 }
 
-
 export default function SpecialReferralNew() {
-  // const accessToken = useAuthStore(s => s.accessToken);
-
   const [form, setForm] = useState({
     personName: "",
     designation: "",
@@ -51,7 +53,6 @@ export default function SpecialReferralNew() {
   });
 
   const [photo, setPhoto] = useState(null);
-  // kept for potential future toggle; not shown in the UI
   const [leftLogo, setLeftLogo] = useState(null);
   const [rightLogo, setRightLogo] = useState(null);
 
@@ -61,6 +62,10 @@ export default function SpecialReferralNew() {
   const [list, setList] = useState([]);
   const [listLoading, setListLoading] = useState(true);
   const [listErr, setListErr] = useState(null);
+
+  // 🔹 loader states for buttons
+  const [loadingOpenId, setLoadingOpenId] = useState(null);
+  const [loadingDownloadId, setLoadingDownloadId] = useState(null);
 
   const setF = (p) => setForm((f) => ({ ...f, ...p }));
 
@@ -90,16 +95,11 @@ export default function SpecialReferralNew() {
     }
   };
 
+  useEffect(() => {
+    ensureAuthOnRefresh();
+    loadSnapshots();
+  }, []);
 
-useEffect(() => {
-  // make sure axios has the auth header on first paint (hard refresh)
-  ensureAuthOnRefresh();
-  // now safely load
-  loadSnapshots();
-}, []); // run once on mount
-
-
-  // fetch a public asset and return a File for FormData (for default logos)
   const fetchPublicAsFile = async (path, fallbackName) => {
     try {
       const res = await fetch(path, { cache: "no-cache" });
@@ -119,10 +119,8 @@ useEffect(() => {
 
     const fd = new FormData();
     Object.entries(form).forEach(([k, v]) => fd.append(k, v ?? ""));
-
     if (photo) fd.append("personPhoto", photo);
 
-    // attach default logos automatically if custom not provided
     if (leftLogo) {
       fd.append("leftLogo", leftLogo);
     } else {
@@ -150,9 +148,9 @@ useEffect(() => {
     }
   };
 
-  // ---- PDF helpers (Authenticated via axios -> Blob URL) ----
+  // ---- PDF helpers with loaders ----
   const openPdf = async (id) => {
-    // open a tab immediately to avoid popup blockers
+    setLoadingOpenId(id);
     const w = window.open("", "_blank");
     try {
       const { data } = await api.get(`/special-referrals/${id}/pdf`, {
@@ -171,17 +169,18 @@ useEffect(() => {
         a.click();
         a.remove();
       }
-      // revoke later (after navigation finishes)
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (err) {
       if (w) w.close();
-      // show a friendly message
       setMsg("Failed to open PDF. Please try Download instead.");
       setTimeout(() => setMsg(null), 3000);
+    } finally {
+      setLoadingOpenId(null);
     }
   };
 
   const downloadPdf = async (id) => {
+    setLoadingDownloadId(id);
     try {
       const { data } = await api.get(`/special-referrals/${id}/pdf`, {
         responseType: "blob",
@@ -198,36 +197,10 @@ useEffect(() => {
     } catch {
       setMsg("Download failed.");
       setTimeout(() => setMsg(null), 3000);
+    } finally {
+      setLoadingDownloadId(null);
     }
   };
-
-  // Optional print (also authenticated)
-  // const printPdf = async (id) => {
-  //   try {
-  //     const { data } = await api.get(`/special-referrals/${id}/pdf`, { responseType: "blob" });
-  //     const url = URL.createObjectURL(new Blob([data], { type: "application/pdf" }));
-  //     const iframe = document.createElement("iframe");
-  //     iframe.style.position = "fixed";
-  //     iframe.style.right = "-9999px";
-  //     iframe.style.bottom = "-9999px";
-  //     iframe.src = url;
-  //     document.body.appendChild(iframe);
-  //     iframe.onload = () => {
-  //       try {
-  //         iframe.contentWindow?.focus();
-  //         iframe.contentWindow?.print();
-  //       } finally {
-  //         setTimeout(() => {
-  //           URL.revokeObjectURL(url);
-  //           document.body.removeChild(iframe);
-  //         }, 1500);
-  //       }
-  //     };
-  //   } catch {
-  //     setMsg("Print failed. Try Open, then print in the new tab.");
-  //     setTimeout(() => setMsg(null), 3000);
-  //   }
-  // };
 
   const fmt = (d) => (d ? new Date(d).toLocaleDateString() : "—");
 
@@ -235,7 +208,7 @@ useEffect(() => {
     <div className="min-h-full bg-gray-50">
       <Navbar />
       <div className="page">
-        {/* Header */}
+         {/* Header */}
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="text-xl font-semibold">New Profile Snapshot</div>
@@ -280,6 +253,7 @@ useEffect(() => {
                     value={form.designation}
                     onChange={(e) => setF({ designation: e.target.value })}
                     placeholder="e.g., Sr. Manager"
+                    required
                   />
                 </Field>
                 <Field label="Grade">
@@ -288,10 +262,12 @@ useEffect(() => {
                     value={form.grade}
                     onChange={(e) => setF({ grade: e.target.value })}
                     placeholder="e.g., M3"
+                    required
                   />
                 </Field>
                 <Field label="Photo">
                   <input
+                    required
                     className="input"
                     type="file"
                     accept="image/*"
@@ -309,6 +285,7 @@ useEffect(() => {
                     type="date"
                     value={form.dateOfJoining}
                     onChange={(e) => setF({ dateOfJoining: e.target.value })}
+                    required
                   />
                 </Field>
                 <Field label="Service Tenure (text)">
@@ -319,6 +296,7 @@ useEffect(() => {
                       setF({ serviceTenureText: e.target.value })
                     }
                     placeholder="e.g., 4 yrs 8 mos"
+                    required
                   />
                 </Field>
                 <Field label="Date of Birth">
@@ -327,6 +305,7 @@ useEffect(() => {
                     type="date"
                     value={form.dateOfBirth}
                     onChange={(e) => setF({ dateOfBirth: e.target.value })}
+                    required
                   />
                 </Field>
               </div>
@@ -340,16 +319,19 @@ useEffect(() => {
                       setF({ totalExperienceText: e.target.value })
                     }
                     placeholder="e.g., 8 yrs domain, 12 yrs industry"
+                    required
                   />
                 </Field>
                 <Field label="Previous Organization">
-                  <input
-                    className="input"
+                  <textarea
+                    className="textarea border-gray-300 border-[1px] rounded p-1"
+                    rows={3}
                     value={form.previousOrganization}
                     onChange={(e) =>
                       setF({ previousOrganization: e.target.value })
                     }
                     placeholder="e.g., ABC Ltd."
+                    required
                   />
                 </Field>
               </div>
@@ -440,8 +422,12 @@ useEffect(() => {
                   <input
                     className="input"
                     type="date"
-                    value={form.presentedOn}
-                    onChange={(e) => setF({ presentedOn: e.target.value })}
+                    value={
+                      form.presentedOn || new Date().toISOString().split("T")[0]
+                    }
+                    onChange={(e) =>
+                      setF({ ...form, presentedOn: e.target.value })
+                    }
                   />
                 </Field>
                 <div className="hidden md:block" />
@@ -539,27 +525,68 @@ useEffect(() => {
                       <Td>{fmt(r.createdAt)}</Td>
                       <Td className="text-right pr-3">
                         <div className="flex justify-end gap-2">
-                          <button
-                            className="btn btn-primary btn-sm"
+                   <button
+                            className="btn btn-primary btn-sm flex items-center gap-2"
                             onClick={() => openPdf(r._id)}
+                            disabled={loadingOpenId === r._id}
                             title="Open PDF"
                           >
+                            {loadingOpenId === r._id && (
+                              <svg
+                                className="h-4 w-4 animate-spin"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                                aria-hidden="true"
+                              >
+                                <circle
+                                  className="opacity-25"
+                                  cx="12"
+                                  cy="12"
+                                  r="10"
+                                  stroke="currentColor"
+                                  strokeWidth="4"
+                                />
+                                <path
+                                  className="opacity-75"
+                                  fill="currentColor"
+                                  d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                                />
+                              </svg>
+                            )}
                             Open
                           </button>
                           <button
-                            className="btn btn-sm bg-emerald-600 hover:bg-emerald-700 text-white"
+                            className="btn btn-sm bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2"
                             onClick={() => downloadPdf(r._id)}
+                            disabled={loadingDownloadId === r._id}
                             title="Download PDF"
                           >
+                            {loadingDownloadId === r._id && (
+                              <svg
+                                className="h-4 w-4 animate-spin"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                                aria-hidden="true"
+                              >
+                                <circle
+                                  className="opacity-25"
+                                  cx="12"
+                                  cy="12"
+                                  r="10"
+                                  stroke="currentColor"
+                                  strokeWidth="4"
+                                />
+                                <path
+                                  className="opacity-75"
+                                  fill="currentColor"
+                                  d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                                />
+                              </svg>
+                            )}
                             Download
                           </button>
-                          {/* <button
-                            className="btn btn-sm bg-indigo-600 hover:bg-indigo-700 text-white"
-                            onClick={() => printPdf(r._id)}
-                            title="Print PDF"
-                          >
-                            Print
-                          </button> */}
                         </div>
                       </Td>
                     </tr>
@@ -584,7 +611,7 @@ useEffect(() => {
   );
 }
 
-/* UI helpers */
+/* UI helpers unchanged */
 function Card({ title, children }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white/80 p-4 shadow-sm backdrop-blur">
