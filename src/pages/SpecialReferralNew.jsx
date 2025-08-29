@@ -30,6 +30,44 @@ function ensureAuthOnRefresh() {
   }
 }
 
+/* ---------- helpers for tenure & age ---------- */
+function calcTenure(fromStr) {
+  if (!fromStr) return "";
+  const from = new Date(fromStr);
+  const to = new Date();
+  if (Number.isNaN(from.getTime())) return "";
+
+  let years = to.getFullYear() - from.getFullYear();
+  let months = to.getMonth() - from.getMonth();
+  let days = to.getDate() - from.getDate();
+
+  if (days < 0) {
+    months -= 1;
+    // don't bother with exact days in string; we only show yrs & mos
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  if (years < 0) return "";
+
+  const parts = [];
+  if (years > 0) parts.push(`${years} yr${years > 1 ? "s" : ""}`);
+  parts.push(`${months} mo${months !== 1 ? "s" : ""}`);
+  return parts.join(" ");
+}
+
+function calcAgeYears(dobStr) {
+  if (!dobStr) return "";
+  const dob = new Date(dobStr);
+  if (Number.isNaN(dob.getTime())) return "";
+  const now = new Date();
+  let years = now.getFullYear() - dob.getFullYear();
+  const m = now.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) years--;
+  return years >= 0 ? String(years) : "";
+}
+
 export default function SpecialReferralNew() {
   const [form, setForm] = useState({
     personName: "",
@@ -99,6 +137,13 @@ export default function SpecialReferralNew() {
     ensureAuthOnRefresh();
     loadSnapshots();
   }, []);
+
+  // 🌟 Auto-calc Service Tenure whenever Date of Joining changes
+  useEffect(() => {
+    if (!form.dateOfJoining) return;
+    const t = calcTenure(form.dateOfJoining);
+    setF({ serviceTenureText: t });
+  }, [form.dateOfJoining]);
 
   const fetchPublicAsFile = async (path, fallbackName) => {
     try {
@@ -204,6 +249,9 @@ export default function SpecialReferralNew() {
 
   const fmt = (d) => (d ? new Date(d).toLocaleDateString() : "—");
 
+  // 🔢 derived age label for UI
+  const ageYears = calcAgeYears(form.dateOfBirth);
+
   return (
     <div className="min-h-full bg-gray-50">
       <Navbar />
@@ -288,7 +336,7 @@ export default function SpecialReferralNew() {
                     required
                   />
                 </Field>
-                <Field label="Service Tenure (text)">
+                <Field label="Service Tenure (HIRA/RRISPAT)">
                   <input
                     className="input"
                     value={form.serviceTenureText}
@@ -300,18 +348,24 @@ export default function SpecialReferralNew() {
                   />
                 </Field>
                 <Field label="Date of Birth">
-                  <input
-                    className="input"
-                    type="date"
-                    value={form.dateOfBirth}
-                    onChange={(e) => setF({ dateOfBirth: e.target.value })}
-                    required
-                  />
+                  {/* input + live age beside it */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="input"
+                      type="date"
+                      value={form.dateOfBirth}
+                      onChange={(e) => setF({ dateOfBirth: e.target.value })}
+                      required
+                    />
+                    <span className="text-xs text-gray-600 whitespace-nowrap">
+                      {ageYears ? `(${ageYears} yrs)` : ""}
+                    </span>
+                  </div>
                 </Field>
               </div>
 
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <Field label="Total Exp (domain & industry)">
+                <Field label="Total Work Exp (domain & industry)">
                   <input
                     className="input"
                     value={form.totalExperienceText}
@@ -322,7 +376,7 @@ export default function SpecialReferralNew() {
                     required
                   />
                 </Field>
-                <Field label="Previous Organization">
+                <Field label="Previous Organizations (max upto 3)">
                   <textarea
                     className="textarea border-gray-300 border-[1px] rounded p-1"
                     rows={3}
@@ -525,7 +579,7 @@ export default function SpecialReferralNew() {
                       <Td>{fmt(r.createdAt)}</Td>
                       <Td className="text-right pr-3">
                         <div className="flex justify-end gap-2">
-                   <button
+                          <button
                             className="btn btn-primary btn-sm flex items-center gap-2"
                             onClick={() => openPdf(r._id)}
                             disabled={loadingOpenId === r._id}

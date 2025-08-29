@@ -3,7 +3,6 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "../store/authStore.js";
 
 const BRAND_NAME = "YourCompany";
-// Put your logo at: /public/logo.png  (served as /logo.png)
 const BRAND_SRC = "/logo.png";
 
 function BrandLogo({ src = BRAND_SRC, name = BRAND_NAME, sizeClass = "h-10 w-15" }) {
@@ -33,16 +32,14 @@ function BrandLogo({ src = BRAND_SRC, name = BRAND_NAME, sizeClass = "h-10 w-15"
 
 const VARIANT_CLASSES = {
   ghost: "btn-ghost",
-  neutral: "bg-gray-100 text-gray-800 hover:bg-gray-200",   // Profile / neutral links
-  info: "bg-blue-600 text-white hover:bg-blue-700",         // Users (primary blue)
-  brand: "bg-indigo-600 text-white hover:bg-indigo-700",    // Special Referral (brand emphasis)
-  success: "bg-green-600 text-white hover:bg-green-700",    // Add User (positive)
-  warning: "bg-amber-500 text-white hover:bg-amber-600",    // Meta Access (attention)
-  primary: "bg-slate-600 text-white hover:bg-slate-700",    // General default
-  danger: "bg-red-600 text-white hover:bg-red-700",         // Logout (destructive)
+  neutral: "bg-gray-100 text-gray-800 hover:bg-gray-200",
+  info: "bg-blue-600 text-white hover:bg-blue-700",
+  brand: "bg-indigo-600 text-white hover:bg-indigo-700",
+  success: "bg-green-600 text-white hover:bg-green-700",
+  warning: "bg-amber-500 text-white hover:bg-amber-600",
+  primary: "bg-slate-600 text-white hover:bg-slate-700",
+  danger: "bg-red-600 text-white hover:bg-red-700",
 };
-
-
 
 function Item({ to, children, variant = "ghost", className = "", onClick }) {
   const v = VARIANT_CLASSES[variant] || VARIANT_CLASSES.ghost;
@@ -71,10 +68,8 @@ export default function Navbar() {
   const close = () => setOpen(false);
   const onLogout = () => { logout(); nav("/login"); };
 
-  // Close mobile menu on route change
   useEffect(() => { setOpen(false); }, [loc.pathname]);
 
-  // ESC closes the menu
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
     window.addEventListener("keydown", onKey);
@@ -85,7 +80,6 @@ export default function Navbar() {
   useEffect(() => {
     if (!open) return;
 
-    // Save current scroll position
     scrollYRef.current = window.scrollY || document.documentElement.scrollTop;
 
     const html = document.documentElement;
@@ -119,7 +113,6 @@ export default function Navbar() {
     };
   }, [open]);
 
-  // Simple focus trap inside the panel
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e) => {
@@ -145,133 +138,141 @@ export default function Navbar() {
   const canSeeAdminArea = isAdmin() || isSuperAdmin();
 
   return (
-    <div className="sticky top-0 z-30 border-b bg-white/80 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        {/* Brand */}
-        <Link to="/" className="flex items-center gap-2">
-          <BrandLogo />
-        </Link>
+    <>
+      {/* 
+        FIX: header is fixed on mobile, sticky on desktop.
+        This prevents it from "scrolling away" when the page is
+        at the bottom and the drawer opens.
+      */}
+      <div className="z-30 border-b bg-white/80 backdrop-blur fixed top-0 left-0 right-0 md:sticky md:top-0">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <Link to="/" className="flex items-center gap-2">
+            <BrandLogo />
+          </Link>
 
-        {/* Desktop actions */}
-        <div className="hidden md:flex items-center gap-2">
-          {canSeeAdminArea && <Item to="/users" variant="info">Users</Item>}
-          {canSeeAdminArea && (
-            <Item to="/special-referrals" variant="brand">Special Referral</Item>
-          )}
-          {isAdmin() && <Item to="/add-user" variant="success">Add User</Item>}
-          {isSuperAdmin() && <Item to="/superadmin" variant="warning">Meta Access</Item>}
-          <Item to="/profile" variant="neutral">{user?.name ?? "Profile"}</Item>
+          {/* Desktop actions */}
+          <div className="hidden md:flex items-center gap-2">
+            {canSeeAdminArea && <Item to="/users" variant="info">Users</Item>}
+            {canSeeAdminArea && (
+              <Item to="/special-referrals" variant="brand">Special Referral</Item>
+            )}
+            {isAdmin() && <Item to="/add-user" variant="success">Add User</Item>}
+            {isSuperAdmin() && <Item to="/superadmin" variant="warning">Meta Access</Item>}
+            <Item to="/profile" variant="neutral">{user?.name ?? "Profile"}</Item>
+            <button
+              onClick={onLogout}
+              className={`btn ${VARIANT_CLASSES.danger}`}
+              title="Sign out"
+            >
+              Logout
+            </button>
+          </div>
+
+          {/* Mobile hamburger */}
           <button
-            onClick={onLogout}
-            className={`btn ${VARIANT_CLASSES.danger}`}
-            title="Sign out"
+            className="md:hidden btn btn-ghost"
+            aria-label="Open menu"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-controls="mobile-drawer"
           >
-            Logout
+            ☰
           </button>
         </div>
 
-        {/* Mobile hamburger */}
-        <button
-          className="md:hidden btn btn-ghost"
-          aria-label="Open menu"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          aria-controls="mobile-drawer"
-        >
-          ☰
-        </button>
+        {/* Mobile menu (overlay + panel) */}
+        {open && (
+          <div className="md:hidden">
+            {/* overlay */}
+            <div
+              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]"
+              onClick={close}
+              aria-hidden="true"
+            />
+
+            {/* panel */}
+            <div
+              id="mobile-drawer"
+              role="dialog"
+              aria-modal="true"
+              ref={panelRef}
+              className="
+                fixed right-0 top-0 z-50
+                h-svh w-[86vw] max-w-xs
+                bg-white shadow-2xl border-l
+                flex flex-col
+                overflow-y-auto overscroll-contain
+                animate-[slideIn_.2s_ease-out]
+              "
+              style={{ animationName: "slideIn" }}
+            >
+              {/* header in panel */}
+              <div className="flex items-center justify-between px-4 py-3 border-b sticky top-0 bg-white/90 backdrop-blur">
+                <div className="flex items-center gap-2">
+                  {/* <BrandLogo /> */}
+                  <span className="font-semibold">Menu</span>
+                </div>
+                <button
+                  ref={closeBtnRef}
+                  className="btn btn-ghost"
+                  aria-label="Close menu"
+                  onClick={close}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* user summary */}
+              <div className="px-4 py-3 border-b">
+                <div className="text-sm text-gray-600">Signed in as</div>
+                <div className="font-medium">{user?.name ?? "User"}</div>
+                <div className="text-xs text-gray-500 break-all">{user?.email}</div>
+              </div>
+
+              {/* links */}
+              <div className="p-3 flex flex-col gap-2">
+                <Item to="/" onClick={close}>Home</Item>
+                {canSeeAdminArea && (
+                  <Item to="/users" onClick={close} variant="info">Users</Item>
+                )}
+                {canSeeAdminArea && (
+                  <Item to="/special-referrals" onClick={close} variant="brand">
+                    Special Referral
+                  </Item>
+                )}
+                {isAdmin() && (
+                  <Item to="/add-user" onClick={close} variant="success">Add User</Item>
+                )}
+                {isSuperAdmin() && (
+                  <Item to="/superadmin" onClick={close} variant="warning">Meta Access</Item>
+                )}
+                <Item to="/profile" onClick={close} variant="neutral">Profile</Item>
+                <button
+                  onClick={() => { close(); onLogout(); }}
+                  className={`btn w-full mt-1 ${VARIANT_CLASSES.danger}`}
+                >
+                  Logout
+                </button>
+              </div>
+
+              {/* little brand footer */}
+              <div className="mt-auto px-4 py-3 text-xs text-gray-500 border-t">
+                © {new Date().getFullYear()} {BRAND_NAME}
+              </div>
+            </div>
+
+            <style>{`
+              @keyframes slideIn {
+                from { transform: translateX(100%); opacity: 0.6; }
+                to   { transform: translateX(0%);   opacity: 1; }
+              }
+            `}</style>
+          </div>
+        )}
       </div>
 
-      {/* Mobile menu (overlay + panel) */}
-      {open && (
-        <div className="md:hidden">
-          {/* overlay */}
-          <div
-            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]"
-            onClick={close}
-            aria-hidden="true"
-          />
-
-          {/* panel */}
-          <div
-            id="mobile-drawer"
-            role="dialog"
-            aria-modal="true"
-            ref={panelRef}
-            className="
-              fixed right-0 top-0 z-50
-              h-svh w-[86vw] max-w-xs
-              bg-white shadow-2xl border-l
-              flex flex-col
-              overflow-y-auto overscroll-contain
-              animate-[slideIn_.2s_ease-out]
-            "
-            style={{ animationName: "slideIn" }}
-          >
-            {/* header in panel */}
-            <div className="flex items-center justify-between px-4 py-3 border-b sticky top-0 bg-white/90 backdrop-blur">
-              <div className="flex items-center gap-2">
-                <BrandLogo />
-                <span className="font-semibold">Menu</span>
-              </div>
-              <button
-                ref={closeBtnRef}
-                className="btn btn-ghost"
-                aria-label="Close menu"
-                onClick={close}
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* user summary */}
-            <div className="px-4 py-3 border-b">
-              <div className="text-sm text-gray-600">Signed in as</div>
-              <div className="font-medium">{user?.name ?? "User"}</div>
-              <div className="text-xs text-gray-500 break-all">{user?.email}</div>
-            </div>
-
-            {/* links */}
-            <div className="p-3 flex flex-col gap-2">
-              <Item to="/" onClick={close}>Home</Item>
-              {canSeeAdminArea && (
-                <Item to="/users" onClick={close} variant="info">Users</Item>
-              )}
-              {canSeeAdminArea && (
-                <Item to="/special-referrals" onClick={close} variant="brand">
-                  Special Referral
-                </Item>
-              )}
-              {isAdmin() && (
-                <Item to="/add-user" onClick={close} variant="success">Add User</Item>
-              )}
-              {isSuperAdmin() && (
-                <Item to="/superadmin" onClick={close} variant="warning">Meta Access</Item>
-              )}
-              <Item to="/profile" onClick={close} variant="neutral">Profile</Item>
-              <button
-                onClick={() => { close(); onLogout(); }}
-                className={`btn w-full mt-1 ${VARIANT_CLASSES.danger}`}
-              >
-                Logout
-              </button>
-            </div>
-
-            {/* little brand footer */}
-            <div className="mt-auto px-4 py-3 text-xs text-gray-500 border-t">
-              © {new Date().getFullYear()} {BRAND_NAME}
-            </div>
-          </div>
-
-          {/* slide-in keyframes */}
-          <style>{`
-            @keyframes slideIn {
-              from { transform: translateX(100%); opacity: 0.6; }
-              to   { transform: translateX(0%);   opacity: 1; }
-            }
-          `}</style>
-        </div>
-      )}
-    </div>
+      {/* Spacer so content isn't hidden under the fixed bar on mobile */}
+      <div className="h-[60px] md:h-0" />
+    </>
   );
 }

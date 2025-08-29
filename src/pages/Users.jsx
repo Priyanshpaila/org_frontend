@@ -47,6 +47,21 @@ export default function Users() {
     toast._t = setTimeout(() => setBanner(null), 2500);
   };
 
+  // simple confirm popup state
+  const [confirmState, setConfirmState] = useState({
+    open: false,
+    title: "",
+    message: "",
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    danger: false,
+    onConfirm: null,
+  });
+  const askConfirm = (opts) =>
+    setConfirmState((s) => ({ ...s, open: true, ...opts }));
+  const closeConfirm = () =>
+    setConfirmState((s) => ({ ...s, open: false, onConfirm: null }));
+
   // --------- Load meta once ----------
   useEffect(() => {
     if (!token) return;
@@ -71,11 +86,12 @@ export default function Users() {
     return () => {
       mounted = false;
     };
-  }, [me?._id]);
+  }, [token]);
 
   // --------- Lock body scroll when modal open ----------
   useEffect(() => {
-    if (!showModal) return;
+    const anyModalOpen = showModal || confirmState.open;
+    if (!anyModalOpen) return;
     const prevHtml = document.documentElement.style.overflow;
     const prevBody = document.body.style.overflow;
     document.documentElement.style.overflow = "hidden";
@@ -84,7 +100,7 @@ export default function Users() {
       document.documentElement.style.overflow = prevHtml || "";
       document.body.style.overflow = prevBody || "";
     };
-  }, [showModal]);
+  }, [showModal, confirmState.open]);
 
   // --------- List loader ----------
   const loadUsers = async (query = "") => {
@@ -163,12 +179,14 @@ export default function Users() {
       const { data } = await api.get("/users", {
         params: { q: query, limit: 10 },
       });
-      // exclude the user themself & duplicates
+      // exclude the user themself, duplicates & deleted users
       const items = (data.items || []).filter(
         (u) =>
           String(u._id) !== String(activeId) &&
-          !(edit?.reportingTo || []).includes(u._id)
+          !(edit?.reportingTo || []).includes(u._id) &&
+          !u.isDeleted
       );
+
       setMgrResults(items);
     } catch (e) {
       setMgrResults([]);
@@ -256,10 +274,9 @@ export default function Users() {
     }
   };
 
-  // --------- Delete actions ----------
-  const softDelete = async () => {
-    if (!canSoftDelete || !activeUser?._id) return;
-    if (!confirm(`Soft delete ${activeUser.name}?`)) return;
+  // --------- Delete / Restore actions ----------
+  const doSoftDelete = async () => {
+    if (!activeUser?._id) return;
     try {
       setWorking(true);
       await api.patch(`/users/${activeUser._id}`, { isDeleted: true });
@@ -272,6 +289,21 @@ export default function Users() {
     } finally {
       setWorking(false);
     }
+  };
+
+  const requestSoftDelete = () => {
+    if (!canSoftDelete || !activeUser?._id) return;
+    askConfirm({
+      title: `Soft delete ${activeUser.name}?`,
+      message:
+        "This will mark the user as deleted. You can restore them later from the Deleted users section.",
+      confirmText: "Soft Delete",
+      danger: false,
+      onConfirm: async () => {
+        closeConfirm();
+        await doSoftDelete();
+      },
+    });
   };
 
   const restore = async () => {
@@ -290,16 +322,21 @@ export default function Users() {
     }
   };
 
-  const hardDelete = async () => {
-    if (!canHardDelete || !activeUser?._id) return;
-    if (activeUser.role === "superadmin")
-      return toast("Cannot delete a superadmin");
-    if (activeUser._id === me?._id)
-      return toast("You cannot delete your own account");
-    if (
-      !confirm(`Permanently delete ${activeUser.name}? This cannot be undone.`)
-    )
-      return;
+  const restoreUser = async (id) => {
+    try {
+      setWorking(true);
+      await api.patch(`/users/${id}`, { isDeleted: false });
+      toast("User restored");
+      await loadUsers(q);
+    } catch (e) {
+      toast(e.response?.data?.error || "Failed to restore");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const doHardDelete = async () => {
+    if (!activeUser?._id) return;
     try {
       setWorking(true);
       await api.delete(`/users/${activeUser._id}/hard`);
@@ -313,13 +350,31 @@ export default function Users() {
     }
   };
 
+  const requestHardDelete = () => {
+    if (!canHardDelete || !activeUser?._id) return;
+    if (activeUser.role === "superadmin")
+      return toast("Cannot delete a superadmin");
+    if (activeUser._id === me?._id)
+      return toast("You cannot delete your own account");
+
+    askConfirm({
+      title: `Permanently delete ${activeUser.name}?`,
+      message:
+        "This action cannot be undone. The user and their data will be removed permanently.",
+      confirmText: "Delete permanently",
+      danger: true,
+      onConfirm: async () => {
+        closeConfirm();
+        await doHardDelete();
+      },
+    });
+  };
+
   /* ---------- UI helpers ---------- */
   const fmt = (d) => (d ? new Date(d).toLocaleDateString() : "—");
-  const filteredCount = useMemo(() => users.length, [users]);
   const activeUsers = useMemo(() => users.filter((u) => !u.isDeleted), [users]);
   const deletedUsers = useMemo(() => users.filter((u) => u.isDeleted), [users]);
-  // const filteredCount = useMemo(() => activeUsers.length, [activeUsers]);
-
+  const filteredCount = useMemo(() => activeUsers.length, [activeUsers]);
 
   return (
     <div className="min-h-full bg-gray-50">
@@ -355,9 +410,9 @@ export default function Users() {
           </div>
         )}
 
-        {/* Mobile: cards */}
+        {/* Mobile: active users */}
         <div className="md:hidden space-y-2">
-          {users.map((u) => (
+          {activeUsers.map((u) => (
             <button
               key={u._id}
               onClick={() => openUser(u._id)}
@@ -379,14 +434,14 @@ export default function Users() {
               </div>
             </button>
           ))}
-          {users.length === 0 && !loading && (
+          {activeUsers.length === 0 && !loading && (
             <div className="card p-4 text-sm text-gray-600">
               No users found.
             </div>
           )}
         </div>
 
-        {/* Desktop: table */}
+        {/* Desktop: active users table */}
         <div className="hidden md:block">
           <div className="card p-4">
             <div className="overflow-auto">
@@ -401,7 +456,7 @@ export default function Users() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((u) => (
+                  {activeUsers.map((u) => (
                     <tr key={u._id} className="border-t">
                       <td className="p-2">
                         <button
@@ -430,11 +485,106 @@ export default function Users() {
                   ))}
                 </tbody>
               </table>
-              {users.length === 0 && !loading && (
+              {activeUsers.length === 0 && !loading && (
                 <div className="p-4 text-sm text-gray-600">No users found.</div>
               )}
             </div>
           </div>
+        </div>
+
+        {/* -------- Deleted users (desktop) -------- */}
+        <div className="hidden md:block mt-6">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-lg font-semibold">Deleted users</div>
+            <div className="text-xs text-gray-500">
+              {deletedUsers.length} item{deletedUsers.length === 1 ? "" : "s"}
+            </div>
+          </div>
+
+          <div className="card p-4">
+            <div className="overflow-auto">
+              <table className="w-full min-w-[820px] text-sm">
+                <thead>
+                  <tr className="text-left">
+                    <th className="p-2">Name</th>
+                    <th className="p-2">Email</th>
+                    <th className="p-2">Role</th>
+                    <th className="p-2">Deleted</th>
+                    <th className="p-2 text-right pr-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deletedUsers.map((u) => (
+                    <tr key={u._id} className="border-t">
+                      <td className="p-2">
+                        <span className="max-w-[280px] truncate text-gray-700">
+                          {u.name}
+                        </span>
+                      </td>
+                      <td className="p-2 break-all">{u.email}</td>
+                      <td className="p-2">
+                        <RoleBadge role={u.role} />
+                      </td>
+                      <td className="p-2">
+                        <span className="badge bg-rose-50 text-rose-700 border border-rose-200">
+                          soft-deleted
+                        </span>
+                      </td>
+                      <td className="p-2 text-right pr-3">
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          disabled={working || !canSoftDelete}
+                          onClick={() => restoreUser(u._id)}
+                          title="Restore user"
+                        >
+                          Restore
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {deletedUsers.length === 0 && (
+                <div className="p-4 text-sm text-gray-600">
+                  No deleted users.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* -------- Deleted users (mobile) -------- */}
+        <div className="md:hidden mt-4 space-y-2">
+          {deletedUsers.map((u) => (
+            <div
+              key={u._id}
+              className="w-full rounded-2xl border border-gray-200 bg-white p-3 shadow-sm"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-medium truncate">{u.name}</div>
+                <RoleBadge role={u.role} />
+              </div>
+              <div className="text-xs text-gray-600 break-all">{u.email}</div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="badge bg-rose-50 text-rose-700 border border-rose-200">
+                  soft-deleted
+                </span>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  disabled={working || !canSoftDelete}
+                  onClick={() => restoreUser(u._id)}
+                >
+                  Restore
+                </button>
+              </div>
+            </div>
+          ))}
+          {deletedUsers.length === 0 && (
+            <div className="card p-4 text-sm text-gray-600">
+              No deleted users.
+            </div>
+          )}
         </div>
       </div>
 
@@ -711,7 +861,7 @@ export default function Users() {
                               </span>
                             ))}
 
-                          {/* For newly added managers not present in original list, show IDs until modal refresh */}
+                          {/* Newly added managers not present in original list */}
                           {(edit.reportingTo || [])
                             .filter(
                               (id) =>
@@ -756,7 +906,7 @@ export default function Users() {
                       <button
                         className="btn bg-amber-500 text-white hover:bg-amber-600"
                         disabled={working}
-                        onClick={softDelete}
+                        onClick={requestSoftDelete}
                       >
                         Soft Delete
                       </button>
@@ -778,7 +928,7 @@ export default function Users() {
                           activeUser.role === "superadmin" ||
                           activeUser._id === me?._id
                         }
-                        onClick={hardDelete}
+                        onClick={requestHardDelete}
                         title={
                           activeUser.role === "superadmin"
                             ? "Cannot delete a superadmin"
@@ -797,6 +947,18 @@ export default function Users() {
           </div>
         </div>
       )}
+
+      {/* Confirm dialog */}
+      <ConfirmDialog
+        open={confirmState.open}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        cancelText={confirmState.cancelText}
+        danger={confirmState.danger}
+        onCancel={closeConfirm}
+        onConfirm={confirmState.onConfirm}
+      />
     </div>
   );
 }
@@ -807,6 +969,43 @@ function Field({ label, children }) {
     <div>
       <div className="mb-1 text-sm font-medium text-gray-700">{label}</div>
       {children}
+    </div>
+  );
+}
+
+function ConfirmDialog({
+  open,
+  title,
+  message,
+  confirmText = "Confirm",
+  cancelText = "Cancel",
+  danger = false,
+  onCancel,
+  onConfirm,
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center p-3 sm:p-6">
+      <div className="absolute inset-0 bg-black/40" onClick={onCancel} />
+      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+        <div className="text-lg font-semibold">{title}</div>
+        {message && <div className="mt-2 text-sm text-gray-600">{message}</div>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="btn btn-ghost" onClick={onCancel}>
+            {cancelText}
+          </button>
+          <button
+            className={`btn ${
+              danger
+                ? "bg-rose-600 text-white hover:bg-rose-700"
+                : "btn-primary"
+            }`}
+            onClick={onConfirm}
+          >
+            {confirmText}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
