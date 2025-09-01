@@ -38,12 +38,31 @@ function SkeletonRow({ cols = 5 }) {
   return (
     <tr>
       {Array.from({ length: cols }).map((_, i) => (
-        <td key={i} className="px-4 py-2">
+        <td key={i} className="px-4 py-3">
           <div className="h-3 w-full max-w-[120px] animate-pulse rounded bg-gray-200" />
         </td>
       ))}
     </tr>
   );
+}
+
+// Soft color palette per status
+function statusPillClasses(status) {
+  const s = String(status || "unknown").toLowerCase().replace(/\s+/g, "_");
+  const map = {
+    active: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100",
+    on_leave: "bg-amber-50 text-amber-700 ring-1 ring-amber-100",
+    leave: "bg-amber-50 text-amber-700 ring-1 ring-amber-100",
+    probation: "bg-sky-50 text-sky-700 ring-1 ring-sky-100",
+    trainee: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100",
+    contract: "bg-fuchsia-50 text-fuchsia-700 ring-1 ring-fuchsia-100",
+    inactive: "bg-slate-100 text-slate-700 ring-1 ring-slate-200",
+    resigned: "bg-rose-50 text-rose-700 ring-1 ring-rose-100",
+    terminated: "bg-rose-50 text-rose-700 ring-1 ring-rose-100",
+    retired: "bg-stone-50 text-stone-700 ring-1 ring-stone-100",
+    unknown: "bg-gray-100 text-gray-700 ring-1 ring-gray-200",
+  };
+  return map[s] || "bg-gray-100 text-gray-700 ring-1 ring-gray-200";
 }
 
 export default function Home() {
@@ -326,18 +345,11 @@ export default function Home() {
                 <button
                   className="btn btn-sm bg-slate-600 text-white hover:bg-slate-700"
                   onClick={() => {
-                    // force reload (only in no-search state)
-                    setDeptRows([]);
-                    setDeptError("");
-                    // toggle q twice to re-trigger effect without disturbing view
-                    // or simpler: set q to same string won't retrigger — so call the loader path by flipping a dummy state
-                    // instead we call the same fetch by toggling local state:
-                    // easiest is to just set deptLoading and refire effect via minor state:
-                    // but we’ll simply re-run the effect by briefly setting q to "_" and back to "".
-                    // Safer: just run the loader inline:
+                    // inline refresh, same logic as effect
                     (async () => {
-                      // mimic the effect logic quickly
                       try {
+                        setDeptRows([]);
+                        setDeptError("");
                         setDeptLoading(true);
                         const { data: departments } = await api.get("/meta/departments");
                         const depts = Array.isArray(departments)
@@ -404,80 +416,130 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="card p-0 overflow-x-auto">
-              {/* sticky header & first column helpers */}
+            {/* Fancy Table */}
+            <div className="card overflow-x-auto p-0 shadow-sm">
               <style>{`
-                .sticky-th { position: sticky; top: 0; z-index: 10; }
-                .sticky-td { position: sticky; left: 0; z-index: 5; background: white; }
+                .sticky-th { position: sticky; top: 0; z-index: 20; }
+                .sticky-td { position: sticky; left: 0; z-index: 10; background: white; }
+                .table-head-grad {
+                  background: linear-gradient(180deg, rgba(248,250,252,0.95) 0%, rgba(241,245,249,0.95) 100%);
+                  backdrop-filter: blur(2px);
+                  box-shadow: 0 1px 0 0 rgba(0,0,0,0.06), 0 2px 6px -2px rgba(0,0,0,0.05);
+                }
+                    /* NEW: horizontal scroll container tweaks */
+    .scroll-x {
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      -webkit-overflow-scrolling: touch; /* iOS momentum */
+      scrollbar-gutter: stable both-edges; /* keeps layout stable when showing scrollbar */
+      touch-action: pan-x; /* improves horizontal scroll on mobile */
+    }
+                .table-wrap { border-radius: 0.75rem; overflow: hidden; border: 1px solid #e5e7eb; }
                 @media (max-width: 640px) {
-                  .sticky-td { min-width: 180px; }
+                  .sticky-td { min-width: 200px; }
                 }
               `}</style>
 
-              {deptLoading ? (
-                <table className="table w-full">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      <th className="sticky-th px-4 py-2 text-left">Department</th>
-                      <th className="sticky-th px-4 py-2 text-right">Total</th>
-                      <th className="sticky-th px-4 py-2 text-right">Status A</th>
-                      <th className="sticky-th px-4 py-2 text-right">Status B</th>
-                      <th className="sticky-th px-4 py-2 text-right">Status C</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <SkeletonRow cols={5} />
-                    <SkeletonRow cols={5} />
-                    <SkeletonRow cols={5} />
-                  </tbody>
-                </table>
-              ) : deptError ? (
-                <div className="p-4 text-sm text-red-600">{deptError}</div>
-              ) : (
-                <table className="table table-zebra w-full">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      <th className="sticky-th px-4 py-2 text-left">Department</th>
-                      <th className="sticky-th px-4 py-2 text-right">Total</th>
-                      {allStatuses.map((s) => (
-                        <th key={s} className="sticky-th px-4 py-2 text-right">
-                          {s}
+              <div className="table-wrap -mx-4 sm:mx-0">
+                 <div className="scroll-x px-4 sm:px-0">
+                  {deptLoading ? (
+                  <table className="table min-w-max">
+                    <thead className="table-head-grad">
+                      <tr>
+                        <th className="sticky-th px-4 py-3 text-left text-sm font-semibold text-slate-700">Department</th>
+                        <th className="sticky-th px-4 py-3 text-right text-sm font-semibold text-slate-700">Total</th>
+                        <th className="sticky-th px-4 py-3 text-right text-sm font-semibold text-slate-700">Status A</th>
+                        <th className="sticky-th px-4 py-3 text-right text-sm font-semibold text-slate-700">Status B</th>
+                        <th className="sticky-th px-4 py-3 text-right text-sm font-semibold text-slate-700">Status C</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <SkeletonRow cols={5} />
+                      <SkeletonRow cols={5} />
+                      <SkeletonRow cols={5} />
+                    </tbody>
+                  </table>
+                ) : deptError ? (
+                  <div className="p-4 text-sm text-red-600">{deptError}</div>
+                ) : (
+                  <table className="table w-full">
+                    <thead className="table-head-grad">
+                      <tr>
+                        <th className="sticky-th px-4 py-3 text-left text-sm font-semibold uppercase tracking-wide text-slate-700">
+                          Department
                         </th>
+                        <th className="sticky-th px-4 py-3 text-right text-sm font-semibold uppercase tracking-wide text-slate-700">
+                          Total
+                        </th>
+                        {allStatuses.map((s) => (
+                          <th
+                            key={s}
+                            className="sticky-th px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-600"
+                            title={s}
+                          >
+                            {s}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {deptRows.map((r, idx) => (
+                        <tr
+                          key={r._id}
+                          className={idx % 2 ? "bg-white hover:bg-slate-50" : "bg-slate-50/60 hover:bg-slate-50"}
+                        >
+                          <td className=" px-4 py-3 text-slate-800 font-medium">
+                            {r.name}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-sm font-semibold text-slate-800 ring-1 ring-slate-200">
+                              {fmt(r.total)}
+                            </span>
+                          </td>
+                          {allStatuses.map((s) => {
+                            const val = r.byStatus?.[s] ?? 0;
+                            const pill = statusPillClasses(s);
+                            return (
+                              <td key={s} className="px-3 py-3 text-right">
+                                <span className={`inline-flex items-center justify-end rounded-full px-2 py-0.5 text-xs font-semibold ${pill}`}>
+                                  {fmt(val)}
+                                </span>
+                              </td>
+                            );
+                          })}
+                        </tr>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {deptRows.map((r) => (
-                      <tr key={r._id}>
-                        <td className="sticky-td px-4 py-2 font-medium">{r.name}</td>
-                        <td className="px-4 py-2 text-right">{fmt(r.total)}</td>
-                        {allStatuses.map((s) => (
-                          <td key={s} className="px-4 py-2 text-right">
-                            {fmt(r.byStatus?.[s] ?? 0)}
+                    </tbody>
+
+                    {deptRows.length > 0 && (
+                      <tfoot>
+                        <tr className="bg-slate-100/70">
+                          <td className="px-4 py-3 font-semibold text-slate-900">
+                            All Departments
                           </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                  {deptRows.length > 0 && (
-                    <tfoot>
-                      <tr className="bg-gray-50">
-                        <td className="sticky-td px-4 py-2 font-semibold">
-                          All Departments
-                        </td>
-                        <td className="px-4 py-2 text-right font-semibold">
-                          {fmt(grandTotals.total)}
-                        </td>
-                        {allStatuses.map((s) => (
-                          <td key={s} className="px-4 py-2 text-right font-semibold">
-                            {fmt(grandTotals.byStatus[s] ?? 0)}
+                          <td className="px-4 py-3 text-right">
+                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-100">
+                              {fmt(grandTotals.total)}
+                            </span>
                           </td>
-                        ))}
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              )}
+                          {allStatuses.map((s) => {
+                            const val = grandTotals.byStatus[s] ?? 0;
+                            const pill = statusPillClasses(s);
+                            return (
+                              <td key={s} className="px-3 py-3 text-right">
+                                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${pill}`}>
+                                  {fmt(val)}
+                                </span>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                )}
+                 </div>
+              </div>
             </div>
           </>
         )}

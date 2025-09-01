@@ -250,12 +250,10 @@ export default function Users() {
       // optional admin reset password (exactly 8 chars)
       if (edit.newPassword && edit.newPassword.length === 8) {
         try {
-          // try explicit password endpoint first
           await api.post(`/users/${activeUser._id}/password`, {
             newPassword: edit.newPassword,
           });
         } catch {
-          // fallback: some backends accept patch with password
           await api.patch(`/users/${activeUser._id}`, {
             password: edit.newPassword,
           });
@@ -264,9 +262,9 @@ export default function Users() {
 
       toast("Changes saved");
       await loadUsers(q);
-      const { data } = await api.get(`/users/${activeUser._id}`);
-      setActiveUser(data);
-      setEdit((ed) => ({ ...(ed || {}), newPassword: "" })); // clear
+
+      // 🔴 close the modal after a successful save
+      closeModal();
     } catch (e) {
       toast(e.response?.data?.error || "Failed to save changes");
     } finally {
@@ -282,8 +280,7 @@ export default function Users() {
       await api.patch(`/users/${activeUser._id}`, { isDeleted: true });
       toast("User soft-deleted");
       await loadUsers(q);
-      const { data } = await api.get(`/users/${activeUser._id}`);
-      setActiveUser(data);
+      closeModal();
     } catch (e) {
       toast(e.response?.data?.error || "Failed to soft delete");
     } finally {
@@ -313,8 +310,7 @@ export default function Users() {
       await api.patch(`/users/${activeUser._id}`, { isDeleted: false });
       toast("User restored");
       await loadUsers(q);
-      const { data } = await api.get(`/users/${activeUser._id}`);
-      setActiveUser(data);
+      closeModal();
     } catch (e) {
       toast(e.response?.data?.error || "Failed to restore");
     } finally {
@@ -375,6 +371,13 @@ export default function Users() {
   const activeUsers = useMemo(() => users.filter((u) => !u.isDeleted), [users]);
   const deletedUsers = useMemo(() => users.filter((u) => u.isDeleted), [users]);
   const filteredCount = useMemo(() => activeUsers.length, [activeUsers]);
+  const vacantUsers = useMemo(
+    () =>
+      users.filter(
+        (u) => !u.isDeleted && String(u.status || "").toLowerCase() === "vacant"
+      ),
+    [users]
+  );
 
   return (
     <div className="min-h-full bg-gray-50">
@@ -554,6 +557,61 @@ export default function Users() {
           </div>
         </div>
 
+        {/* -------- Vacant users (desktop) -------- */}
+        <div className="hidden md:block mt-6">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-lg font-semibold">Vacant users</div>
+            <div className="text-xs text-gray-500">
+              {vacantUsers.length} item{vacantUsers.length === 1 ? "" : "s"}
+            </div>
+          </div>
+
+          <div className="card p-4">
+            <div className="overflow-auto">
+              <table className="w-full min-w-[820px] text-sm">
+                <thead>
+                  <tr className="text-left">
+                    <th className="p-2">Name</th>
+                    <th className="p-2">Email</th>
+                    <th className="p-2">Role</th>
+                    <th className="p-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vacantUsers.map((u) => (
+                    <tr key={u._id} className="border-t">
+                      <td className="p-2">
+                        <button
+                          className="max-w-[280px] truncate underline underline-offset-2 hover:text-blue-700"
+                          onClick={() => openUser(u._id)}
+                          title="View & edit"
+                        >
+                          {u.name}
+                        </button>
+                      </td>
+                      <td className="p-2 break-all">{u.email}</td>
+                      <td className="p-2">
+                        <RoleBadge role={u.role} />
+                      </td>
+                      <td className="p-2">
+                        <span className="badge bg-amber-50 text-amber-700 border border-amber-200">
+                          {u.status || "vacant"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {vacantUsers.length === 0 && (
+                <div className="p-4 text-sm text-gray-600">
+                  No vacant users.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* -------- Deleted users (mobile) -------- */}
         <div className="md:hidden mt-4 space-y-2">
           {deletedUsers.map((u) => (
@@ -586,6 +644,32 @@ export default function Users() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* -------- Vacant users (mobile) -------- */}
+      <div className="md:hidden mt-4 space-y-2">
+        {vacantUsers.map((u) => (
+          <button
+            key={u._id}
+            onClick={() => openUser(u._id)}
+            className="w-full rounded-2xl border border-gray-200 bg-white p-3 text-left shadow-sm hover:shadow transition"
+            title="View & edit"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium truncate">{u.name}</div>
+              <RoleBadge role={u.role} />
+            </div>
+            <div className="text-xs text-gray-600 break-all">{u.email}</div>
+            <div className="mt-1">
+              <span className="badge bg-amber-50 text-amber-700 border border-amber-200">
+                {u.status || "vacant"}
+              </span>
+            </div>
+          </button>
+        ))}
+        {vacantUsers.length === 0 && (
+          <div className="card p-4 text-sm text-gray-600">No vacant users.</div>
+        )}
       </div>
 
       {/* -------- Modal: User details + full edit -------- */}

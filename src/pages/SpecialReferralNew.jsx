@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Navbar from "../components/Navbar.jsx";
 import api from "../lib/api.js";
 import { useAuthStore } from "../store/authStore.js";
@@ -43,7 +43,6 @@ function calcTenure(fromStr) {
 
   if (days < 0) {
     months -= 1;
-    // don't bother with exact days in string; we only show yrs & mos
   }
   if (months < 0) {
     years -= 1;
@@ -68,8 +67,16 @@ function calcAgeYears(dobStr) {
   return years >= 0 ? String(years) : "";
 }
 
-export default function SpecialReferralNew() {
-  const [form, setForm] = useState({
+// Local YYYY-MM-DD (avoids UTC off-by-one)
+function todayLocal() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// factory for a clean form (used initially and on reset)
+function makeEmptyForm() {
+  return {
     personName: "",
     designation: "",
     grade: "",
@@ -85,10 +92,14 @@ export default function SpecialReferralNew() {
     additionalCommentsHeadHR: "",
     commentsDirectorsOrMD: "",
     finalDecisionTaken: "",
-    presentedOn: "",
+    presentedOn: todayLocal(), // default to today
     headHRName: "",
     directorOrMDName: "",
-  });
+  };
+}
+
+export default function SpecialReferralNew() {
+  const [form, setForm] = useState(makeEmptyForm());
 
   const [photo, setPhoto] = useState(null);
   const [leftLogo, setLeftLogo] = useState(null);
@@ -104,6 +115,16 @@ export default function SpecialReferralNew() {
   // 🔹 loader states for buttons
   const [loadingOpenId, setLoadingOpenId] = useState(null);
   const [loadingDownloadId, setLoadingDownloadId] = useState(null);
+  const [loadingDeleteId, setLoadingDeleteId] = useState(null);
+
+  // 🔹 modal state for delete confirmation
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmId, setConfirmId] = useState(null);
+  const [confirmName, setConfirmName] = useState("");
+
+  // refs for resetting DOM elements (form + file input)
+  const formRef = useRef(null);
+  const photoRef = useRef(null);
 
   const setF = (p) => setForm((f) => ({ ...f, ...p }));
 
@@ -158,12 +179,25 @@ export default function SpecialReferralNew() {
     }
   };
 
+  const resetForm = () => {
+    setForm(makeEmptyForm()); // reset controlled fields
+    setPhoto(null);
+    setLeftLogo(null);
+    setRightLogo(null);
+
+    // reset DOM form & file input
+    if (formRef.current) formRef.current.reset();
+    if (photoRef.current) photoRef.current.value = "";
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setMsg(null);
 
     const fd = new FormData();
-    Object.entries(form).forEach(([k, v]) => fd.append(k, v ?? ""));
+    // ✅ Ensure presentedOn is never empty
+    const payload = { ...form, presentedOn: form.presentedOn || todayLocal() };
+    Object.entries(payload).forEach(([k, v]) => fd.append(k, v ?? ""));
     if (photo) fd.append("personPhoto", photo);
 
     if (leftLogo) {
@@ -183,7 +217,11 @@ export default function SpecialReferralNew() {
       setCreating(true);
       const { data } = await api.post("/special-referrals", fd);
       setMsg(`Saved. Record ID: ${data.id}`);
-      setPhoto(null);
+
+      // ⬅️ reset everything after successful save
+      resetForm();
+
+      // reload list
       await loadSnapshots();
     } catch (e) {
       setMsg(e.response?.data?.error || "Failed to save");
@@ -193,31 +231,35 @@ export default function SpecialReferralNew() {
     }
   };
 
-  // ---- PDF helpers with loaders ----
+  // ---- PDF helper: open only after loaded ----
   const openPdf = async (id) => {
     setLoadingOpenId(id);
-    const w = window.open("", "_blank");
     try {
       const { data } = await api.get(`/special-referrals/${id}/pdf`, {
         responseType: "blob",
       });
-      const url = URL.createObjectURL(
-        new Blob([data], { type: "application/pdf" })
-      );
-      if (w) {
-        w.location.href = url;
-      } else {
+
+      const blob = new Blob([data], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+
+      // Try normal open first
+      const newTab = window.open(url, "_blank", "noopener,noreferrer");
+
+      if (!newTab) {
+        // Fallback if popup was blocked
         const a = document.createElement("a");
         a.href = url;
         a.target = "_blank";
+        a.rel = "noopener";
         document.body.appendChild(a);
         a.click();
         a.remove();
       }
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+      // Revoke after a short delay (gives the tab time to load the blob)
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
     } catch (err) {
-      if (w) w.close();
-      setMsg("Failed to open PDF. Please try Download instead.");
+      setMsg("Failed to open PDF. You can try Download instead.");
       setTimeout(() => setMsg(null), 3000);
     } finally {
       setLoadingOpenId(null);
@@ -247,6 +289,31 @@ export default function SpecialReferralNew() {
     }
   };
 
+  // Delete snapshot (actual API call)
+  const deleteSnapshot = async (id, personName) => {
+    setLoadingDeleteId(id);
+    try {
+      await api.delete(`/special-referrals/${id}`);
+      // Optimistic update
+      setList((prev) => prev.filter((x) => x._id !== id));
+      setMsg("Snapshot deleted.");
+      setTimeout(() => setMsg(null), 2000);
+    } catch (err) {
+      const errMsg =
+        err?.response?.data?.error ||
+        (err?.response?.status === 404
+          ? "Snapshot not found."
+          : "Failed to delete snapshot.");
+      setMsg(errMsg);
+      setTimeout(() => setMsg(null), 3000);
+    } finally {
+      setLoadingDeleteId(null);
+      setConfirmOpen(false);
+      setConfirmId(null);
+      setConfirmName("");
+    }
+  };
+
   const fmt = (d) => (d ? new Date(d).toLocaleDateString() : "—");
 
   // 🔢 derived age label for UI
@@ -256,7 +323,7 @@ export default function SpecialReferralNew() {
     <div className="min-h-full bg-gray-50">
       <Navbar />
       <div className="page">
-         {/* Header */}
+        {/* Header */}
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="text-xl font-semibold">New Profile Snapshot</div>
@@ -278,6 +345,7 @@ export default function SpecialReferralNew() {
 
         {/* Form */}
         <form
+          ref={formRef}
           onSubmit={submit}
           className="grid grid-cols-1 gap-4 lg:grid-cols-3"
         >
@@ -315,6 +383,7 @@ export default function SpecialReferralNew() {
                 </Field>
                 <Field label="Photo">
                   <input
+                    ref={photoRef}
                     required
                     className="input"
                     type="file"
@@ -390,8 +459,7 @@ export default function SpecialReferralNew() {
                 </Field>
               </div>
             </Card>
-
-            <Card title="Background">
+             <Card title="Background">
               <Field label="Qualifications (one per line)">
                 <textarea
                   className="textarea"
@@ -476,12 +544,8 @@ export default function SpecialReferralNew() {
                   <input
                     className="input"
                     type="date"
-                    value={
-                      form.presentedOn || new Date().toISOString().split("T")[0]
-                    }
-                    onChange={(e) =>
-                      setF({ ...form, presentedOn: e.target.value })
-                    }
+                    value={form.presentedOn} // fully controlled by state
+                    onChange={(e) => setF({ presentedOn: e.target.value })}
                   />
                 </Field>
                 <div className="hidden md:block" />
@@ -554,118 +618,115 @@ export default function SpecialReferralNew() {
             </div>
           </div>
 
-          <div className="card p-0 overflow-hidden">
-            <div className="overflow-auto">
-              <table className="w-full min-w-[840px] text-sm">
-                <thead className="bg-gray-50">
-                  <tr className="text-left">
-                    <Th>Name</Th>
-                    <Th>Designation</Th>
-                    <Th>Grade</Th>
-                    <Th>Presented On</Th>
-                    <Th>Created</Th>
-                    <Th className="text-right pr-3">Actions</Th>
+        <div className="card p-0 overflow-hidden">
+          <div className="overflow-auto">
+            <table className="w-full min-w-[840px] text-sm">
+              <thead className="bg-gray-50">
+                <tr className="text-left">
+                  <Th>Name</Th>
+                  <Th>Designation</Th>
+                  <Th>Grade</Th>
+                  <Th>Presented On</Th>
+                  <Th>Created</Th>
+                  <Th className="text-right pr-3">Actions</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((r) => (
+                  <tr key={r._id} className="border-t">
+                    <Td className="font-medium">
+                      {r.personName || r.name || "—"}
+                    </Td>
+                    <Td>{r.designation || "—"}</Td>
+                    <Td>{r.grade || "—"}</Td>
+                    <Td>{fmt(r.presentedOn)}</Td>
+                    <Td>{fmt(r.createdAt)}</Td>
+                    <Td className="text-right pr-3">
+                      <div className="flex justify-end gap-2">
+                        {/* Open */}
+                        <button
+                          className="btn btn-primary btn-sm flex items-center gap-2"
+                          onClick={() => openPdf(r._id)}
+                          disabled={loadingOpenId === r._id}
+                          title="Open PDF"
+                        >
+                          {loadingOpenId === r._id && (
+                            <Spinner className="h-4 w-4" />
+                          )}
+                          Open
+                        </button>
+
+                        {/* Download */}
+                        <button
+                          className="btn btn-sm bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2"
+                          onClick={() => downloadPdf(r._id)}
+                          disabled={loadingDownloadId === r._id}
+                          title="Download PDF"
+                        >
+                          {loadingDownloadId === r._id && (
+                            <Spinner className="h-4 w-4" />
+                          )}
+                          Download
+                        </button>
+
+                        {/* Delete (opens modal) */}
+                        <button
+                          className="btn btn-sm btn-ghost text-rose-600 hover:bg-rose-50 flex items-center gap-2"
+                          onClick={() => {
+                            setConfirmId(r._id);
+                            setConfirmName(r.personName || r.name || "");
+                            setConfirmOpen(true);
+                          }}
+                          disabled={loadingDeleteId === r._id}
+                          title="Delete snapshot"
+                          aria-label="Delete snapshot"
+                        >
+                          {loadingDeleteId === r._id ? (
+                            <Spinner className="h-4 w-4" />
+                          ) : (
+                            <TrashIcon className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
+                    </Td>
                   </tr>
-                </thead>
-                <tbody>
-                  {list.map((r) => (
-                    <tr key={r._id} className="border-t">
-                      <Td className="font-medium">
-                        {r.personName || r.name || "—"}
-                      </Td>
-                      <Td>{r.designation || "—"}</Td>
-                      <Td>{r.grade || "—"}</Td>
-                      <Td>{fmt(r.presentedOn)}</Td>
-                      <Td>{fmt(r.createdAt)}</Td>
-                      <Td className="text-right pr-3">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            className="btn btn-primary btn-sm flex items-center gap-2"
-                            onClick={() => openPdf(r._id)}
-                            disabled={loadingOpenId === r._id}
-                            title="Open PDF"
-                          >
-                            {loadingOpenId === r._id && (
-                              <svg
-                                className="h-4 w-4 animate-spin"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                                aria-hidden="true"
-                              >
-                                <circle
-                                  className="opacity-25"
-                                  cx="12"
-                                  cy="12"
-                                  r="10"
-                                  stroke="currentColor"
-                                  strokeWidth="4"
-                                />
-                                <path
-                                  className="opacity-75"
-                                  fill="currentColor"
-                                  d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                                />
-                              </svg>
-                            )}
-                            Open
-                          </button>
-                          <button
-                            className="btn btn-sm bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2"
-                            onClick={() => downloadPdf(r._id)}
-                            disabled={loadingDownloadId === r._id}
-                            title="Download PDF"
-                          >
-                            {loadingDownloadId === r._id && (
-                              <svg
-                                className="h-4 w-4 animate-spin"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                                aria-hidden="true"
-                              >
-                                <circle
-                                  className="opacity-25"
-                                  cx="12"
-                                  cy="12"
-                                  r="10"
-                                  stroke="currentColor"
-                                  strokeWidth="4"
-                                />
-                                <path
-                                  className="opacity-75"
-                                  fill="currentColor"
-                                  d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                                />
-                              </svg>
-                            )}
-                            Download
-                          </button>
-                        </div>
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!listLoading && list.length === 0 && (
-                <div className="p-4 text-sm text-gray-600">
-                  No snapshots yet.
-                </div>
-              )}
-              {listErr && (
-                <div className="p-4 text-sm text-rose-700 bg-rose-50 border-t">
-                  {listErr}
-                </div>
-              )}
-            </div>
+                ))}
+              </tbody>
+            </table>
+            {!listLoading && list.length === 0 && (
+              <div className="p-4 text-sm text-gray-600">
+                No snapshots yet.
+              </div>
+            )}
+            {listErr && (
+              <div className="p-4 text-sm text-rose-700 bg-rose-50 border-t">
+                {listErr}
+              </div>
+            )}
           </div>
         </div>
+        </div>
       </div>
+
+      {/* ===== Delete Confirm Modal ===== */}
+      {confirmOpen && (
+        <DeleteConfirmModal
+          name={confirmName}
+          onClose={() => {
+            if (loadingDeleteId) return; // prevent closing during delete
+            setConfirmOpen(false);
+            setConfirmId(null);
+            setConfirmName("");
+          }}
+          onConfirm={() => deleteSnapshot(confirmId, confirmName)}
+          loading={Boolean(loadingDeleteId)}
+        />
+      )}
     </div>
   );
 }
 
-/* UI helpers unchanged */
+/* UI helpers unchanged (with tiny additions for icons/spinner) */
 function Card({ title, children }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white/80 p-4 shadow-sm backdrop-blur">
@@ -708,6 +769,106 @@ function LogoPreview() {
         alt="Right logo"
         className="h-6 w-auto object-contain"
       />
+    </div>
+  );
+}
+
+/* NEW: simple inline spinner + trash icon (no deps) */
+function Spinner({ className = "" }) {
+  return (
+    <svg
+      className={`animate-spin ${className}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+      />
+    </svg>
+  );
+}
+
+function TrashIcon({ className = "" }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
+      <path
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 6h18M9 6v-.5a2.5 2.5 0 012.5-2.5h1A2.5 2.5 0 0115 5.5V6m-8 0l1 13a2 2 0 002 2h4a2 2 0 002-2l1-13M10 11v6M14 11v6"
+      />
+    </svg>
+  );
+}
+
+/* NEW: Accessible delete confirmation modal */
+function DeleteConfirmModal({ name, onClose, onConfirm, loading }) {
+  // Close on ESC
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose?.();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      role="dialog"
+      aria-modal="true"
+    >
+      {/* Overlay */}
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
+      {/* Panel */}
+      <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
+        <div className="mb-2 text-base font-semibold text-slate-900">
+          Delete snapshot?
+        </div>
+        <div className="mb-4 text-sm text-slate-600">
+          {name ? (
+            <>You’re about to delete the snapshot for <span className="font-medium text-slate-800">“{name}”</span>. This action cannot be undone.</>
+          ) : (
+            <>You’re about to delete this snapshot. This action cannot be undone.</>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            className="btn btn-ghost"
+            onClick={onClose}
+            disabled={loading}
+          >
+            Cancel
+          </button>
+          <button
+            className="btn bg-rose-600 text-white hover:bg-rose-700 flex items-center gap-2"
+            onClick={onConfirm}
+            disabled={loading}
+          >
+            {loading && <Spinner className="h-4 w-4" />} Delete
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
