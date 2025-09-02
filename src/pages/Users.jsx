@@ -207,70 +207,101 @@ export default function Users() {
     }));
   };
 
-  // --------- Save edits ----------
-  const saveEdits = async () => {
-    if (!activeUser?._id || !edit) return;
-    try {
-      setSaving(true);
+// --------- Save edits ----------
+const saveEdits = async () => {
+  if (!activeUser?._id || !edit) return;
+  try {
+    setSaving(true);
 
-      // compute diffs
-      const diffs = {};
-      const base = activeUser;
-      if (edit.name !== (base.name || "")) diffs.name = edit.name;
-      if (edit.email !== (base.email || "")) diffs.email = edit.email;
-      if ((edit.empId || "") !== (base.empId || ""))
-        diffs.empId = edit.empId || "";
-      if ((edit.status || "active") !== (base.status || "active"))
-        diffs.status = edit.status || "active";
-      const depId = base.department?._id || "";
-      const divId = base.division?._id || "";
-      const desId = base.designation?._id || "";
-      if ((edit.department || "") !== depId)
-        diffs.department = edit.department || "";
-      if ((edit.division || "") !== divId) diffs.division = edit.division || "";
-      if ((edit.designation || "") !== desId)
-        diffs.designation = edit.designation || "";
-      const doj = base.dateOfJoining ? base.dateOfJoining.slice(0, 10) : "";
-      if ((edit.dateOfJoining || "") !== (doj || ""))
-        diffs.dateOfJoining = edit.dateOfJoining || "";
-      const repIds = (base.reportingTo || []).map((r) => r._id);
-      if (JSON.stringify(repIds) !== JSON.stringify(edit.reportingTo || []))
-        diffs.reportingTo = edit.reportingTo || [];
+    // ---------- helpers ----------
+    const toId = (x) =>
+      typeof x === "string" ? x : x && (x._id || x.id) ? String(x._id || x.id) : null;
 
-      // role change (some backends use a dedicated endpoint)
-      if ((edit.role || "user") !== (base.role || "user")) {
-        await api.patch(`/users/${activeUser._id}/role`, { role: edit.role });
-      }
+    // ---------- compute diffs ----------
+    const diffs = {};
+    const base = activeUser;
 
-      // general patch only if something changed
-      if (Object.keys(diffs).length > 0) {
-        await api.patch(`/users/${activeUser._id}`, diffs);
-      }
+    if (edit.name !== (base.name || "")) diffs.name = edit.name;
+    if (edit.email !== (base.email || "")) diffs.email = edit.email;
+    if ((edit.empId || "") !== (base.empId || "")) diffs.empId = edit.empId || "";
+    if ((edit.status || "active") !== (base.status || "active")) diffs.status = edit.status || "active";
 
-      // optional admin reset password (exactly 8 chars)
-      if (edit.newPassword && edit.newPassword.length === 8) {
-        try {
-          await api.post(`/users/${activeUser._id}/password`, {
-            newPassword: edit.newPassword,
-          });
-        } catch {
-          await api.patch(`/users/${activeUser._id}`, {
-            password: edit.newPassword,
-          });
-        }
-      }
+    const depId = base.department?._id || "";
+    const divId = base.division?._id || "";
+    const desId = base.designation?._id || "";
+    if ((edit.department || "") !== depId) diffs.department = edit.department || "";
+    if ((edit.division || "") !== divId) diffs.division = edit.division || "";
+    if ((edit.designation || "") !== desId) diffs.designation = edit.designation || "";
 
-      toast("Changes saved");
-      await loadUsers(q);
+    const doj = base.dateOfJoining ? base.dateOfJoining.slice(0, 10) : "";
+    if ((edit.dateOfJoining || "") !== (doj || "")) diffs.dateOfJoining = edit.dateOfJoining || "";
 
-      // 🔴 close the modal after a successful save
-      closeModal();
-    } catch (e) {
-      toast(e.response?.data?.error || "Failed to save changes");
-    } finally {
-      setSaving(false);
+    const repIdsBefore = (base.reportingTo || []).map(toId).filter(Boolean).map(String);
+    const repIdsAfter  = (edit.reportingTo || []).map(String);
+    const reportingChanged = JSON.stringify(repIdsBefore) !== JSON.stringify(repIdsAfter);
+    if (reportingChanged) {
+      diffs.reportingTo = repIdsAfter;
     }
-  };
+
+    // ---------- ONE-TIME ancestors initialization ----------
+    // If base.ancestors is empty (or not set) AND we have at least one manager in edit,
+    // initialize ancestors = manager.ancestors + manager (unique), only this first time.
+    const baseAnc = Array.isArray(base.ancestors) ? base.ancestors.map(toId).filter(Boolean) : [];
+    const ancestorsEmpty = baseAnc.length === 0;
+
+    if (ancestorsEmpty && repIdsAfter.length > 0) {
+      const primaryMgrId = repIdsAfter[0]; // pick first selected manager
+      let chain = [];
+      try {
+        const { data: mgr } = await api.get(`/users/${primaryMgrId}`);
+        const mgrAnc = Array.isArray(mgr?.ancestors)
+          ? mgr.ancestors.map(toId).filter(Boolean)
+          : [];
+        chain = Array.from(new Set([...mgrAnc, String(primaryMgrId)]));
+      } catch (e) {
+        // fallback: at least set the selected manager(s)
+        chain = Array.from(new Set(repIdsAfter));
+      }
+      // Avoid self-reference just in case
+      const selfId = String(activeUser._id);
+      chain = chain.filter((id) => id && id !== selfId);
+      if (chain.length) {
+        diffs.ancestors = chain;
+      }
+    }
+
+    // ---------- role change (some backends use a dedicated endpoint) ----------
+    if ((edit.role || "user") !== (base.role || "user")) {
+      await api.patch(`/users/${activeUser._id}/role`, { role: edit.role });
+    }
+
+    // ---------- apply general patch ----------
+    if (Object.keys(diffs).length > 0) {
+      // console.log('PATCH diffs ->', diffs);
+      await api.patch(`/users/${activeUser._id}`, diffs);
+    }
+
+    // ---------- optional admin reset password (exactly 8 chars) ----------
+    if (edit.newPassword && edit.newPassword.length === 8) {
+      try {
+        await api.post(`/users/${activeUser._id}/password`, { newPassword: edit.newPassword });
+      } catch {
+        await api.patch(`/users/${activeUser._id}`, { password: edit.newPassword });
+      }
+    }
+
+    // done
+    toast("Changes saved");
+    await loadUsers(q);
+    closeModal();
+  } catch (e) {
+    toast(e.response?.data?.error || "Failed to save changes");
+  } finally {
+    setSaving(false);
+  }
+};
+
+
 
   // --------- Delete / Restore actions ----------
   const doSoftDelete = async () => {
