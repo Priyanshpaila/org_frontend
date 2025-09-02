@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "../store/authStore.js";
 
-const BRAND_NAME = "YourCompany";
+const BRAND_NAME = "RR ISPAT";
 const BRAND_SRC = "/logo.png";
 
 function BrandLogo({ src = BRAND_SRC, name = BRAND_NAME, sizeClass = "h-10 w-15" }) {
