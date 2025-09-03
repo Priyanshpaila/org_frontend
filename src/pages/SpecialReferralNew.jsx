@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Navbar from "../components/Navbar.jsx";
 import api from "../lib/api.js";
 import { useAuthStore } from "../store/authStore.js";
+import { generateSnapshotPdfClient } from "../components/SnapshotPdfClient";
 
 const DEFAULT_LEFT_LOGO = "/left-logo.png";
 const DEFAULT_RIGHT_LOGO = "/right-logo.png";
@@ -21,7 +22,6 @@ function ensureAuthOnRefresh() {
     token.trim() !== ""
   ) {
     if (!s?.accessToken && s?.setTokens) s.setTokens({ accessToken: token });
-    // ensure the very first request after refresh has the header
     api.defaults.headers.common.Authorization = `Bearer ${token}`;
     return true;
   } else {
@@ -41,13 +41,8 @@ function calcTenure(fromStr) {
   let months = to.getMonth() - from.getMonth();
   let days = to.getDate() - from.getDate();
 
-  if (days < 0) {
-    months -= 1;
-  }
-  if (months < 0) {
-    years -= 1;
-    months += 12;
-  }
+  if (days < 0) months -= 1;
+  if (months < 0) { years -= 1; months += 12; }
   if (years < 0) return "";
 
   const parts = [];
@@ -112,17 +107,16 @@ export default function SpecialReferralNew() {
   const [listLoading, setListLoading] = useState(true);
   const [listErr, setListErr] = useState(null);
 
-  // 🔹 loader states for buttons
   const [loadingOpenId, setLoadingOpenId] = useState(null);
   const [loadingDownloadId, setLoadingDownloadId] = useState(null);
   const [loadingDeleteId, setLoadingDeleteId] = useState(null);
 
-  // 🔹 modal state for delete confirmation
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmId, setConfirmId] = useState(null);
   const [confirmName, setConfirmName] = useState("");
 
-  // refs for resetting DOM elements (form + file input)
+  const [previewing, setPreviewing] = useState(false);
+
   const formRef = useRef(null);
   const photoRef = useRef(null);
 
@@ -159,7 +153,7 @@ export default function SpecialReferralNew() {
     loadSnapshots();
   }, []);
 
-  // 🌟 Auto-calc Service Tenure whenever Date of Joining changes
+  // Auto-calc Service Tenure whenever Date of Joining changes
   useEffect(() => {
     if (!form.dateOfJoining) return;
     const t = calcTenure(form.dateOfJoining);
@@ -180,12 +174,10 @@ export default function SpecialReferralNew() {
   };
 
   const resetForm = () => {
-    setForm(makeEmptyForm()); // reset controlled fields
+    setForm(makeEmptyForm());
     setPhoto(null);
     setLeftLogo(null);
     setRightLogo(null);
-
-    // reset DOM form & file input
     if (formRef.current) formRef.current.reset();
     if (photoRef.current) photoRef.current.value = "";
   };
@@ -195,7 +187,6 @@ export default function SpecialReferralNew() {
     setMsg(null);
 
     const fd = new FormData();
-    // ✅ Ensure presentedOn is never empty
     const payload = { ...form, presentedOn: form.presentedOn || todayLocal() };
     Object.entries(payload).forEach(([k, v]) => fd.append(k, v ?? ""));
     if (photo) fd.append("personPhoto", photo);
@@ -217,11 +208,7 @@ export default function SpecialReferralNew() {
       setCreating(true);
       const { data } = await api.post("/special-referrals", fd);
       setMsg(`Saved. Record ID: ${data.id}`);
-
-      // ⬅️ reset everything after successful save
       resetForm();
-
-      // reload list
       await loadSnapshots();
     } catch (e) {
       setMsg(e.response?.data?.error || "Failed to save");
@@ -231,70 +218,98 @@ export default function SpecialReferralNew() {
     }
   };
 
-  // ---- PDF helper: open only after loaded ----
+  // Preview PDF from the CURRENT (unsaved) form + in-memory files
+  const previewPdfFromForm = async () => {
+    setPreviewing(true);
+    const record = { ...form };
+    const toRevoke = [];
+    try {
+      if (photo instanceof File) {
+        const u = URL.createObjectURL(photo);
+        record.personPhoto = u;
+        toRevoke.push(u);
+      }
+      if (leftLogo instanceof File) {
+        const u = URL.createObjectURL(leftLogo);
+        record.leftLogoUrl = u;
+        toRevoke.push(u);
+      } else {
+        record.leftLogoUrl = record.leftLogoUrl || DEFAULT_LEFT_LOGO;
+      }
+      if (rightLogo instanceof File) {
+        const u = URL.createObjectURL(rightLogo);
+        record.rightLogoUrl = u;
+        toRevoke.push(u);
+      } else {
+        record.rightLogoUrl = record.rightLogoUrl || DEFAULT_RIGHT_LOGO;
+      }
+      record.presentedOn = record.presentedOn || todayLocal();
+
+      await generateSnapshotPdfClient(record, {
+        action: "open",
+        filename: `profile-snapshot-preview-${(record.personName || "unsaved").replace(/\s+/g,"_")}.pdf`,
+      });
+    } finally {
+      toRevoke.forEach((u) => { try { URL.revokeObjectURL(u); } catch {} });
+      setPreviewing(false);
+    }
+  };
+
+  // OPEN from saved record
   const openPdf = async (id) => {
     setLoadingOpenId(id);
     try {
-      const { data } = await api.get(`/special-referrals/${id}/pdf`, {
-        responseType: "blob",
+      const { data } = await api.get(`/special-referrals/${id}`);
+      const record = {
+        ...data,
+        personPhoto: data.personPhoto || null,
+        personPhotoUrl: data.personPhotoUrl || null,
+        leftLogoUrl: DEFAULT_LEFT_LOGO,
+        rightLogoUrl: DEFAULT_RIGHT_LOGO,
+        presentedOn: data.presentedOn || todayLocal(),
+      };
+      await generateSnapshotPdfClient(record, {
+        action: "open",
+        filename: `profile-snapshot-${data.personName}.pdf`,
       });
-
-      const blob = new Blob([data], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-
-      // Try normal open first
-      const newTab = window.open(url, "_blank", "noopener,noreferrer");
-
-      if (!newTab) {
-        // Fallback if popup was blocked
-        const a = document.createElement("a");
-        a.href = url;
-        a.target = "_blank";
-        a.rel = "noopener";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
-
-      // Revoke after a short delay (gives the tab time to load the blob)
-      setTimeout(() => URL.revokeObjectURL(url), 15000);
-    } catch (err) {
-      setMsg("Failed to open PDF. You can try Download instead.");
-      setTimeout(() => setMsg(null), 3000);
+    } catch {
+      setMsg("Failed to open PDF.");
+      setTimeout(() => setMsg(null), 2500);
     } finally {
       setLoadingOpenId(null);
     }
   };
 
+  // DOWNLOAD from saved record
   const downloadPdf = async (id) => {
     setLoadingDownloadId(id);
     try {
-      const { data } = await api.get(`/special-referrals/${id}/pdf`, {
-        responseType: "blob",
+      const { data } = await api.get(`/special-referrals/${id}`);
+      const record = {
+        ...data,
+        personPhoto: data.personPhoto || null,
+        personPhotoUrl: data.personPhotoUrl || null,
+        leftLogoUrl: DEFAULT_LEFT_LOGO,
+        rightLogoUrl: DEFAULT_RIGHT_LOGO,
+        presentedOn: data.presentedOn || todayLocal(),
+      };
+      await generateSnapshotPdfClient(record, {
+        action: "download",
+        filename: `profile-snapshot-${data.personName}.pdf`,
       });
-      const blob = new Blob([data], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `profile-snapshot-${id}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      URL.revokeObjectURL(url);
-      a.remove();
     } catch {
       setMsg("Download failed.");
-      setTimeout(() => setMsg(null), 3000);
+      setTimeout(() => setMsg(null), 2500);
     } finally {
       setLoadingDownloadId(null);
     }
   };
 
-  // Delete snapshot (actual API call)
-  const deleteSnapshot = async (id, personName) => {
+  // Delete snapshot
+  const deleteSnapshot = async (id) => {
     setLoadingDeleteId(id);
     try {
       await api.delete(`/special-referrals/${id}`);
-      // Optimistic update
       setList((prev) => prev.filter((x) => x._id !== id));
       setMsg("Snapshot deleted.");
       setTimeout(() => setMsg(null), 2000);
@@ -315,9 +330,7 @@ export default function SpecialReferralNew() {
   };
 
   const fmt = (d) => (d ? new Date(d).toLocaleDateString() : "—");
-
-  // 🔢 derived age label for UI
-  const ageYears = calcAgeYears(form.dateOfBirth);
+  const ageYearsLabel = calcAgeYears(form.dateOfBirth);
 
   return (
     <div className="min-h-full bg-gray-50">
@@ -328,8 +341,7 @@ export default function SpecialReferralNew() {
           <div>
             <div className="text-xl font-semibold">New Profile Snapshot</div>
             <div className="text-xs text-gray-500">
-              Fill details and save. Logos are taken from your public folder by
-              default.
+              Fill details and save. Logos are taken from your public folder by default.
             </div>
           </div>
           <div className="hidden sm:flex items-center gap-2">
@@ -417,7 +429,6 @@ export default function SpecialReferralNew() {
                   />
                 </Field>
                 <Field label="Date of Birth">
-                  {/* input + live age beside it */}
                   <div className="flex items-center gap-2">
                     <input
                       className="input"
@@ -427,7 +438,7 @@ export default function SpecialReferralNew() {
                       required
                     />
                     <span className="text-xs text-gray-600 whitespace-nowrap">
-                      {ageYears ? `(${ageYears} yrs)` : ""}
+                      {ageYearsLabel ? `(${ageYearsLabel} yrs)` : ""}
                     </span>
                   </div>
                 </Field>
@@ -459,7 +470,8 @@ export default function SpecialReferralNew() {
                 </Field>
               </div>
             </Card>
-             <Card title="Background">
+
+            <Card title="Background">
               <Field label="Qualifications (one per line)">
                 <textarea
                   className="textarea"
@@ -544,7 +556,7 @@ export default function SpecialReferralNew() {
                   <input
                     className="input"
                     type="date"
-                    value={form.presentedOn} // fully controlled by state
+                    value={form.presentedOn}
                     onChange={(e) => setF({ presentedOn: e.target.value })}
                   />
                 </Field>
@@ -592,13 +604,29 @@ export default function SpecialReferralNew() {
             </Card>
 
             <Card>
-              <button
-                className="btn btn-primary w-full"
-                type="submit"
-                disabled={creating}
-              >
-                {creating ? "Saving…" : "Save Snapshot"}
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  className="btn btn-primary w-full"
+                  type="submit"
+                  disabled={creating}
+                  title="Save to server"
+                >
+                  {creating ? "Saving…" : "Save Snapshot"}
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary w-full flex items-center justify-center gap-2"
+                  onClick={previewPdfFromForm}
+                  disabled={previewing}
+                  title="Open a PDF preview without saving"
+                >
+                  {previewing && <Spinner className="h-4 w-4" />} Preview PDF
+                </button>
+              </div>
+              <div className="mt-2 text-xs text-gray-500">
+                Preview uses the photo/logos you’ve selected in this form (even before saving).
+              </div>
             </Card>
           </section>
         </form>
@@ -618,102 +646,100 @@ export default function SpecialReferralNew() {
             </div>
           </div>
 
-        <div className="card p-0 overflow-hidden">
-          <div className="overflow-auto">
-            <table className="w-full min-w-[840px] text-sm">
-              <thead className="bg-gray-50">
-                <tr className="text-left">
-                  <Th>Name</Th>
-                  <Th>Designation</Th>
-                  <Th>Grade</Th>
-                  <Th>Presented On</Th>
-                  <Th>Created</Th>
-                  <Th className="text-right pr-3">Actions</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {list.map((r) => (
-                  <tr key={r._id} className="border-t">
-                    <Td className="font-medium">
-                      {r.personName || r.name || "—"}
-                    </Td>
-                    <Td>{r.designation || "—"}</Td>
-                    <Td>{r.grade || "—"}</Td>
-                    <Td>{fmt(r.presentedOn)}</Td>
-                    <Td>{fmt(r.createdAt)}</Td>
-                    <Td className="text-right pr-3">
-                      <div className="flex justify-end gap-2">
-                        {/* Open */}
-                        <button
-                          className="btn btn-primary btn-sm flex items-center gap-2"
-                          onClick={() => openPdf(r._id)}
-                          disabled={loadingOpenId === r._id}
-                          title="Open PDF"
-                        >
-                          {loadingOpenId === r._id && (
-                            <Spinner className="h-4 w-4" />
-                          )}
-                          Open
-                        </button>
-
-                        {/* Download */}
-                        <button
-                          className="btn btn-sm bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2"
-                          onClick={() => downloadPdf(r._id)}
-                          disabled={loadingDownloadId === r._id}
-                          title="Download PDF"
-                        >
-                          {loadingDownloadId === r._id && (
-                            <Spinner className="h-4 w-4" />
-                          )}
-                          Download
-                        </button>
-
-                        {/* Delete (opens modal) */}
-                        <button
-                          className="btn btn-sm btn-ghost text-rose-600 hover:bg-rose-50 flex items-center gap-2"
-                          onClick={() => {
-                            setConfirmId(r._id);
-                            setConfirmName(r.personName || r.name || "");
-                            setConfirmOpen(true);
-                          }}
-                          disabled={loadingDeleteId === r._id}
-                          title="Delete snapshot"
-                          aria-label="Delete snapshot"
-                        >
-                          {loadingDeleteId === r._id ? (
-                            <Spinner className="h-4 w-4" />
-                          ) : (
-                            <TrashIcon className="h-4 w-4" />
-                          )}
-                        </button>
-                      </div>
-                    </Td>
+          <div className="card p-0 overflow-hidden">
+            <div className="overflow-auto">
+              <table className="w-full min-w-[840px] text-sm">
+                <thead className="bg-gray-50">
+                  <tr className="text-left">
+                    <Th>Name</Th>
+                    <Th>Designation</Th>
+                    <Th>Grade</Th>
+                    <Th>Presented On</Th>
+                    <Th>Created</Th>
+                    <Th className="text-right pr-3">Actions</Th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            {!listLoading && list.length === 0 && (
-              <div className="p-4 text-sm text-gray-600">
-                No snapshots yet.
-              </div>
-            )}
-            {listErr && (
-              <div className="p-4 text-sm text-rose-700 bg-rose-50 border-t">
-                {listErr}
-              </div>
-            )}
+                </thead>
+                <tbody>
+                  {list.map((r) => (
+                    <tr key={r._id} className="border-t">
+                      <Td className="font-medium">
+                        {r.personName || r.name || "—"}
+                      </Td>
+                      <Td>{r.designation || "—"}</Td>
+                      <Td>{r.grade || "—"}</Td>
+                      <Td>{fmt(r.presentedOn)}</Td>
+                      <Td>{fmt(r.createdAt)}</Td>
+                      <Td className="text-right pr-3">
+                        <div className="flex justify-end gap-2">
+                          {/* Open */}
+                          <button
+                            className="btn btn-primary btn-sm flex items-center gap-2"
+                            onClick={() => openPdf(r._id)}
+                            disabled={loadingOpenId === r._id}
+                            title="Open PDF"
+                          >
+                            {loadingOpenId === r._id && (
+                              <Spinner className="h-4 w-4" />
+                            )}
+                            Open
+                          </button>
+
+                          {/* Download */}
+                          <button
+                            className="btn btn-sm bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2"
+                            onClick={() => downloadPdf(r._id)}
+                            disabled={loadingDownloadId === r._id}
+                            title="Download PDF"
+                          >
+                            {loadingDownloadId === r._id && (
+                              <Spinner className="h-4 w-4" />
+                            )}
+                            Download
+                          </button>
+
+                          {/* Delete */}
+                          <button
+                            className="btn btn-sm btn-ghost text-rose-600 hover:bg-rose-50 flex items-center gap-2"
+                            onClick={() => {
+                              setConfirmId(r._id);
+                              setConfirmName(r.personName || r.name || "");
+                              setConfirmOpen(true);
+                            }}
+                            disabled={loadingDeleteId === r._id}
+                            title="Delete snapshot"
+                            aria-label="Delete snapshot"
+                          >
+                            {loadingDeleteId === r._id ? (
+                              <Spinner className="h-4 w-4" />
+                            ) : (
+                              <TrashIcon className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!listLoading && list.length === 0 && (
+                <div className="p-4 text-sm text-gray-600">No snapshots yet.</div>
+              )}
+              {listErr && (
+                <div className="p-4 text-sm text-rose-700 bg-rose-50 border-t">
+                  {listErr}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
         </div>
       </div>
 
-      {/* ===== Delete Confirm Modal ===== */}
+      {/* Delete Confirm Modal */}
       {confirmOpen && (
         <DeleteConfirmModal
           name={confirmName}
           onClose={() => {
-            if (loadingDeleteId) return; // prevent closing during delete
+            if (loadingDeleteId) return;
             setConfirmOpen(false);
             setConfirmId(null);
             setConfirmName("");
@@ -726,7 +752,7 @@ export default function SpecialReferralNew() {
   );
 }
 
-/* UI helpers unchanged (with tiny additions for icons/spinner) */
+/* UI helpers */
 function Card({ title, children }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white/80 p-4 shadow-sm backdrop-blur">
@@ -772,8 +798,6 @@ function LogoPreview() {
     </div>
   );
 }
-
-/* NEW: simple inline spinner + trash icon (no deps) */
 function Spinner({ className = "" }) {
   return (
     <svg
@@ -798,7 +822,6 @@ function Spinner({ className = "" }) {
     </svg>
   );
 }
-
 function TrashIcon({ className = "" }) {
   return (
     <svg
@@ -817,14 +840,9 @@ function TrashIcon({ className = "" }) {
     </svg>
   );
 }
-
-/* NEW: Accessible delete confirmation modal */
 function DeleteConfirmModal({ name, onClose, onConfirm, loading }) {
-  // Close on ESC
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") onClose?.();
-    };
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
@@ -835,29 +853,24 @@ function DeleteConfirmModal({ name, onClose, onConfirm, loading }) {
       role="dialog"
       aria-modal="true"
     >
-      {/* Overlay */}
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-[1px]"
-        onClick={onClose}
-      />
-      {/* Panel */}
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" onClick={onClose} />
       <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
         <div className="mb-2 text-base font-semibold text-slate-900">
           Delete snapshot?
         </div>
         <div className="mb-4 text-sm text-slate-600">
           {name ? (
-            <>You’re about to delete the snapshot for <span className="font-medium text-slate-800">“{name}”</span>. This action cannot be undone.</>
+            <>
+              You’re about to delete the snapshot for{" "}
+              <span className="font-medium text-slate-800">“{name}”</span>. This
+              action cannot be undone.
+            </>
           ) : (
             <>You’re about to delete this snapshot. This action cannot be undone.</>
           )}
         </div>
         <div className="flex items-center justify-end gap-2">
-          <button
-            className="btn btn-ghost"
-            onClick={onClose}
-            disabled={loading}
-          >
+          <button className="btn btn-ghost" onClick={onClose} disabled={loading}>
             Cancel
           </button>
           <button
